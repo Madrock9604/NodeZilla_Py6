@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="100" height="40" viewBox="0 0 100 40" xmlns="http://www.w3.org/2000/svg">
+  <!-- Leads -->
+  <line x1="5" y1="20" x2="25" y2="20" stroke="#000" stroke-width="2"/>
+  <line x1="75" y1="20" x2="95" y2="20" stroke="#000" stroke-width="2"/>
+  <!-- Zigzag body (6 segments) -->
+  <polyline fill="none" stroke="#000" stroke-width="2"
+            points="25,20 30,12 35,28 40,12 45,28 50,12 55,28 60,12 65,28 70,12 75,20"/>
+</svg>
