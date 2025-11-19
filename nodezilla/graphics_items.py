@@ -2,7 +2,7 @@
 # File: nodezilla/graphics_items.py
 # ========================================
 from __future__ import annotations
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from PySide6.QtCore import Qt, QPointF, QRectF
 from PySide6.QtGui import QBrush, QPen, QPainter, QPainterPath, QPainterPathStroker
 from PySide6.QtWidgets import (
@@ -305,20 +305,28 @@ class ComponentItem(QGraphicsRectItem):
 
 
 class WireItem(QGraphicsPathItem):
-    def __init__(self, a: "PortItem", b: "PortItem", theme: Theme | None = None):
+    def __init__(self, start_port: Optional[PortItem], end_port: Optional[PortItem], points: List[QPointF]):
         super().__init__()
         self.setZValue(0)
         pen = QPen(Qt.black, 2); pen.setCosmetic(True)
         self.setPen(pen)
 
-        self.port_a, self.port_b = a, b
-        self._pts: list[QPointF] = []      # waypoints only (no endpoints)
+        self.port_a = start_port
+        self.port_b = end_port
+        self._points: List[QPointF] = list(points)     # waypoints only (no endpoints)
         self._handles: list[_Handle] = []
 
         self.port_a.add_wire(self)
         self.port_b.add_wire(self)
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
-        self.update_path()
+        self.attach(None)
+
+        @property
+        def points(self) -> List[QPointF]:
+            return list(self._points)
+        
+        def _anchor_pos(self, port: Optional[PortItem], fallback: QPointF) -> QPointF:
+            return port.scenePos() if port is not None else fallback
 
         # apply theme immediately if available
         if theme is None:

@@ -2,7 +2,7 @@
 # File: nodezilla/app.py
 # ========================================
 from PySide6.QtWidgets import QApplication
-from .main_window import MainWindow
+from nodezilla.main_window import MainWindow
 import sys
 
 

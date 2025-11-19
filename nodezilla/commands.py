@@ -40,9 +40,7 @@ class AddComponentCommand(QUndoCommand):
         # remove connected wires first
         for port in (self.comp.port_left, self.comp.port_right):
             for w in list(port.wires):
-                port.remove_wire(w)
-                other = w.port_a if w.port_b is port else w.port_b
-                other.remove_wire(w)
+                w.detach(self.scene)
                 self.scene.removeItem(w)
         self.scene.removeItem(self.comp)
 
