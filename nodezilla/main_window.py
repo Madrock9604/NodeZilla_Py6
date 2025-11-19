@@ -6,7 +6,7 @@ from typing import List
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence, QUndoStack
 from PySide6.QtWidgets import (
-    QMainWindow, QTabWidget, QWidget, QVBoxLayout, QToolBar, QLabel, QSpinBox,
+    QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QToolBar, QLabel, QSpinBox,
     QDockWidget, QStatusBar, QFileDialog, QMessageBox
 )
 import json
@@ -15,6 +15,7 @@ from .schematic_view import SchematicView
 from .properties_panel import PropertiesPanel
 from .graphics_items import ComponentItem
 from .commands import DeleteItemsCommand, RotateComponentCommand
+from .theme import ThemeWatcher
 
 
 class InstrumentsPlaceholder(QWidget):
@@ -47,7 +48,11 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel("Ready")
         self.undo_stack = QUndoStack(self)
 
+        self._watcher = ThemeWatcher(QApplication.instance(), self._apply_theme)
+
         self.schematic_tab = SchematicTab(self.status_label, self.undo_stack)
+        theme = self._watcher.current_theme()
+        self._apply_theme(theme)
         self.instruments_tab = InstrumentsPlaceholder()
         self.tabs.addTab(self.schematic_tab, "Schematic")
         self.tabs.addTab(self.instruments_tab, "Instruments")
@@ -82,6 +87,15 @@ class MainWindow(QMainWindow):
         sb = QStatusBar()
         sb.addWidget(self.status_label)
         self.setStatusBar(sb)
+
+
+    def _apply_theme(self, theme):
+        # If UI not ready yet, try again on the next event loop tick
+        if not hasattr(self, "schematic_tab") or self.schematic_tab is None:
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: self._apply_theme(theme))
+            return
+        self.schematic_tab.scene.apply_theme(theme)
 
     # selection → props
     def _on_selection_changed(self):

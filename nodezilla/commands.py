@@ -9,13 +9,15 @@ from .graphics_items import ComponentItem, PortItem
 
 # For type hints only (never executed at runtime)
 if TYPE_CHECKING:
-    from .graphics_items import WireItem as WireType
+    from graphics_items import WireItem as WireType
 
 # For runtime isinstance checks (may be None during import)
 try:
-    from .graphics_items import WireItem as _WireItem
+    from graphics_items import ComponentItem as _ComponentItem
+    from graphics_items import WireItem as _WireItem
 except Exception:
     _WireItem = None  # type: ignore
+    _ComponentItem = _WireItem = None
 
 if TYPE_CHECKING:
     from .schematic_scene import SchematicScene
@@ -53,11 +55,15 @@ class AddWireCommand(QUndoCommand):
 
 
     def redo(self):
-        self.wire.attach(self.scene)
+        self.scene.addItem(self.wire)
+        theme = getattr(self.scene, "theme", None)
+        if theme and hasattr(self.wire, "apply_theme"):
+            self.wire.apply_theme(theme)
+        self.wire.setSelected(True)
 
 
     def undo(self):
-        self.wire.detach(self.scene)
+        self.scene.removeItem(self.wire)
 
 
 class MoveComponentCommand(QUndoCommand):
@@ -98,38 +104,66 @@ class RotateComponentCommand(QUndoCommand):
 
 
 class DeleteItemsCommand(QUndoCommand):
-    def __init__(self, scene: 'SchematicScene', items: List):
-        super().__init__("Delete selection")
+    def __init__(self, scene, selected_items):
+        super().__init__("Delete")
         self.scene = scene
-        comps = [i for i in items if isinstance(i, ComponentItem)]
-        # ✅ Only call isinstance if WireItem is a real type
-        wires = [i for i in items if (_WireItem and isinstance(i, _WireItem))]
+
+        # Normalize selection and expand to include wires attached to components
+        comps = []
+        wires = []
+
+        for it in selected_items:
+            if _ComponentItem is not None and isinstance(it, _ComponentItem):
+                comps.append(it)
+            elif _WireItem is not None and isinstance(it, _WireItem):
+                wires.append(it)
+
+        # Add wires attached to selected components
         for c in comps:
-            for port in (c.port_left, c.port_right):
-                for w in port.wires:
-                    if w not in wires:
-                        wires.append(w)
-        self.comps = comps
-        self.wires = wires
-        self._comp_state = [
-            (c, QPointF(c.pos()), c.rotation(), c.refdes, c.value)
-            for c in self.comps
-        ]
+            for port_attr in ("port_left", "port_right"):
+                p = getattr(c, port_attr, None)
+                if p and hasattr(p, "wires"):
+                    for w in list(p.wires):
+                        if w not in wires:
+                            wires.append(w)
+
+        # Dedup, and store ordering for redo/undo
+        self._comps = list(dict.fromkeys(comps))
+        self._wires = list(dict.fromkeys(wires))
 
     def redo(self):
-        for w in self.wires:
-            if w.scene():
+        # Remove wires first, then components
+        for w in self._wires:
+            if hasattr(w, "detach"):  # detach from ports
                 w.detach(self.scene)
-        for c, *_ in self._comp_state:
-            if c.scene():
-                self.scene.removeItem(c)
+            self.scene.removeItem(w)  # ✅ actually remove from scene
 
+        for c in self._comps:
+            self.scene.removeItem(c)  # components go after wires
 
     def undo(self):
-        for c, pos, rot, refdes, value in self._comp_state:
-            if not c.scene():
-                self.scene.addItem(c)
-            c.setPos(pos); c.setRotation(rot); c.set_refdes(refdes); c.set_value(value)
-        for w in self.wires:
-            if not w.scene():
-                w.attach(self.scene)
+        # Restore components first, so ports exist
+        for c in self._comps:
+            self.scene.addItem(c)
+
+        # Then restore wires and reattach to ports
+        for w in self._wires:
+            self.scene.addItem(w)
+            if hasattr(w, "attach"):
+                w.attach()
+            # ensure the path reflects current port positions
+            if hasattr(w, "update_path"):
+                w.update_path()
+
+class SetWirePointsCommand(QUndoCommand):
+    def __init__(self, wire, new_pts):
+        super().__init__("Edit Wire")
+        self.wire = wire
+        self.new = list(new_pts) if new_pts else []
+        self.old = list(getattr(wire, "_pts", []))
+
+    def redo(self):
+        self.wire.set_points(self.new)
+
+    def undo(self):
+        self.wire.set_points(self.old)

@@ -4,7 +4,7 @@
 from __future__ import annotations
 from typing import Optional, List
 from PySide6.QtCore import Qt, QPointF, QRectF
-from PySide6.QtGui import QBrush, QPen, QPainter, QPainterPath
+from PySide6.QtGui import QBrush, QPen, QPainter, QPainterPath, QPainterPathStroker
 from PySide6.QtWidgets import (
 QGraphicsItem, QGraphicsRectItem, QGraphicsEllipseItem, QGraphicsTextItem,
 QGraphicsPathItem
@@ -12,7 +12,7 @@ QGraphicsPathItem
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .schematic_scene import SchematicScene
-
+from .theme import Theme
 
 PORT_RADIUS = 5.0
 COMP_WIDTH = 100.0
@@ -78,6 +78,11 @@ class PortItem(QGraphicsEllipseItem):
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
         self.setAcceptHoverEvents(True)
 
+    def apply_theme(self, theme: Theme):
+        from PySide6.QtGui import QBrush, QPen
+        # Keep port fill visible against bg; white works in both themes
+        self.setBrush(QBrush(Qt.white))
+        self.setPen(QPen(theme.component_stroke, 1.25))
 
     def add_wire(self, wire: 'WireItem'):
         if wire not in self.wires:
@@ -110,6 +115,7 @@ class ComponentItem(QGraphicsRectItem):
         self.kind = kind
         self.setBrush(QBrush(Qt.white))
         self.setPen(QPen(Qt.black, 1.5))
+        self._theme: Theme | None = None
         self.setFlags(
             QGraphicsItem.ItemIsMovable |
             QGraphicsItem.ItemIsSelectable |
@@ -142,10 +148,22 @@ class ComponentItem(QGraphicsRectItem):
         # for undoable moves
         self._press_pos: Optional[QPointF] = None
 
+    def apply_theme(self, theme: Theme):
+        self.setBrush(QBrush(theme.component_fill))
+        self.setPen(QPen(theme.component_stroke, 1.5))
+        # label: whichever attribute holds it (adjust name if different)
+        if hasattr(self, "label") and self.label is not None:
+            self.label.setDefaultTextColor(theme.text)
+
     def _update_label(self):
         from PySide6.QtWidgets import QApplication
         text = (self.refdes + (" " if self.refdes and self.value else "") + self.value).strip()
-        self.label.setDefaultTextColor(QApplication.instance().palette().text().color())
+        sc = self.scene()
+        theme = getattr(sc, "theme", None) if sc else None
+        if theme:
+            self.label.setDefaultTextColor(theme.text)
+        else:
+            self.label.setDefaultTextColor(QApplication.instance().palette().text().color())
         self.label.setPlainText(text)
         br = self.rect()
         self.label.setPos(-self.label.boundingRect().width()/2, br.top() - 18)
@@ -287,35 +305,181 @@ class ComponentItem(QGraphicsRectItem):
 
 
 class WireItem(QGraphicsPathItem):
-    def __init__(self, a: PortItem, b: PortItem):
+    def __init__(self, a: "PortItem", b: "PortItem", theme: Theme | None = None):
         super().__init__()
         self.setZValue(0)
-        self.setPen(QPen(Qt.black, 2))
-        self.port_a = a
-        self.port_b = b
+        pen = QPen(Qt.black, 2); pen.setCosmetic(True)
+        self.setPen(pen)
+
+        self.port_a, self.port_b = a, b
+        self._pts: list[QPointF] = []      # waypoints only (no endpoints)
+        self._handles: list[_Handle] = []
+
         self.port_a.add_wire(self)
         self.port_b.add_wire(self)
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.update_path()
 
-    def update_path(self):
-        p1 = self.port_a.scenePos()
-        p2 = self.port_b.scenePos()
-        mid_x = (p1.x() + p2.x()) / 2
-        path = QPainterPath(p1)
-        path.lineTo(mid_x, p1.y())
-        path.lineTo(mid_x, p2.y())
-        path.lineTo(p2)
-        self.setPath(path)
+        # apply theme immediately if available
+        if theme is None:
+            sc = a.scene() or b.scene()
+            theme = getattr(sc, "theme", None)
+        if theme:
+            self.apply_theme(theme)
 
-    # helpers for undo/redo
-    def attach(self, scene: 'SchematicScene'):
-        self.port_a.add_wire(self)
-        self.port_b.add_wire(self)
-        scene.addItem(self)
+    # --- theming ---
+    def apply_theme(self, theme: Theme, selected: bool | None = None):
+        if selected is None:
+            selected = self.isSelected()
+        pen = self.pen()
+        pen.setCosmetic(True)
+        pen.setColor(theme.wire_selected if selected else theme.wire)
+        self.setPen(pen)
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemSelectedHasChanged:
+            sc = self.scene(); theme = getattr(sc, "theme", None)
+            if theme: self.apply_theme(theme, selected=bool(value))
+            # show/hide waypoint handles when selected toggles
+            for h in self._handles: h.setVisible(bool(value))
+        elif change == QGraphicsItem.ItemSceneHasChanged:
+            sc = self.scene(); theme = getattr(sc, "theme", None)
+            if theme: self.apply_theme(theme)
+        return super().itemChange(change, value)
+
+    # --- geometry ---
+    def points(self) -> list[QPointF]:
+        return [self.port_a.scenePos(), *self._pts, self.port_b.scenePos()]
+
+    def set_points(self, pts: list[QPointF]):
+        self._pts = pts[:] if pts else []
         self.update_path()
+        self._rebuild_handles()
 
-    def detach(self, scene: 'SchematicScene'):
-        self.port_a.remove_wire(self)
-        self.port_b.remove_wire(self)
-        scene.removeItem(self)
+    def update_path(self):
+        pts = self._manhattan_points()
+        if not pts:
+            self.setPath(QPainterPath()); return
+        p = QPainterPath(pts[0])
+        for q in pts[1:]:
+            p.lineTo(q)
+        self.setPath(p)
+
+    def shape(self):
+        stroker = QPainterPathStroker()
+        stroker.setWidth(12)            # easier to click
+        return stroker.createStroke(self.path())
+
+    # --- handles for waypoints ---
+    def _rebuild_handles(self):
+        sc = self.scene()
+        for h in self._handles:
+            if sc: sc.removeItem(h)
+        self._handles.clear()
+        for i, pt in enumerate(self._pts):
+            h = _Handle(self, i)
+            h.setParentItem(self)
+            h.setPos(pt)
+            h.setVisible(self.isSelected())  # follows selection
+            self._handles.append(h)
+
+    # --- helpers for inserting a waypoint on nearest segment ---
+    def closest_segment_point(self, p: QPointF) -> tuple[int, QPointF]:
+        pts = self.points()
+        best_d2 = float("inf"); insert_idx = 0; best_q = pts[0]
+        for i in range(len(pts)-1):
+            a, b = pts[i], pts[i+1]
+            abx, aby = (b.x()-a.x()), (b.y()-a.y())
+            ab2 = abx*abx + aby*aby
+            if ab2 == 0:
+                q = a
+            else:
+                t = ((p.x()-a.x())*abx + (p.y()-a.y())*aby) / ab2
+                t = 0.0 if t < 0 else 1.0 if t > 1 else t
+                q = QPointF(a.x()+t*abx, a.y()+t*aby)
+            d2 = (q.x()-p.x())**2 + (q.y()-p.y())**2
+            if d2 < best_d2:
+                best_d2, best_q, insert_idx = d2, q, i
+        # insert between pts[insert_idx] and pts[insert_idx+1]
+        return insert_idx, best_q
+    
+    def detach(self, scene):
+        """Detach from ports and scene-safe cleanup."""
+        # remove from each port’s wire list (if your PortItem exposes remove_wire)
+        if hasattr(self.port_a, "remove_wire"):
+            try: self.port_a.remove_wire(self)
+            except Exception: pass
+        if hasattr(self.port_b, "remove_wire"):
+            try: self.port_b.remove_wire(self)
+            except Exception: pass
+        # drop handles if you added waypoint handles
+        for h in getattr(self, "_handles", []):
+            try:
+                if scene: scene.removeItem(h)
+            except Exception:
+                pass
+        self._handles = []
+
+    def attach(self):
+        """Reattach to ports (used by undo)."""
+        if hasattr(self.port_a, "add_wire"):
+            self.port_a.add_wire(self)
+        if hasattr(self.port_b, "add_wire"):
+            self.port_b.add_wire(self)
+
+    def _manhattan_points(self):
+        """Return points with only 90° segments (insert doglegs as needed)."""
+        pts = self.points()
+        if not pts: return []
+        out = [pts[0]]
+        for q in pts[1:]:
+            p = out[-1]
+            if p.x() == q.x() or p.y() == q.y():
+                # already orthogonal
+                out.append(q)
+            else:
+                # insert a right-angle corner: horizontal then vertical
+                out.append(QPointF(q.x(), p.y()))
+                out.append(q)
+        return out
+
+    def setSelected(self, sel: bool):
+        super().setSelected(sel)
+        # If no explicit waypoints yet, materialize the current L-corner
+        if sel and not self._pts:
+            a = self.port_a.scenePos()
+            b = self.port_b.scenePos()
+            if a.x() != b.x() and a.y() != b.y():
+                corner = QPointF(b.x(), a.y())  # same “L” you display
+                self.set_points([corner])       # becomes draggable
+        # show/hide handles
+        for h in getattr(self, "_handles", []):
+            h.setVisible(sel)
+
+class _Handle(QGraphicsEllipseItem):
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionChange:
+            scene = self.scene()
+            mouse = value
+            # Snap if your scene supports it
+            if hasattr(scene, "_snap_point"):
+                mouse = scene._snap_point(mouse)
+
+            w = self.wire
+            i = self.idx
+            # neighbors (endpoints come from ports)
+            prev_pt = w.port_a.scenePos() if i == 0 else w._pts[i-1]
+            next_pt = w.port_b.scenePos() if i == len(w._pts)-1 else w._pts[i+1]
+
+            # Constrain to Manhattan “cross”: choose the closer option
+            cand1 = QPointF(prev_pt.x(), mouse.y())  # keep x aligned with prev, move y
+            cand2 = QPointF(mouse.x(), next_pt.y())  # keep y aligned with next, move x
+            # Pick the one closer to the mouse
+            d1 = (cand1.x()-mouse.x())**2 + (cand1.y()-mouse.y())**2
+            d2 = (cand2.x()-mouse.x())**2 + (cand2.y()-mouse.y())**2
+            newpos = cand1 if d1 <= d2 else cand2
+
+            w._pts[i] = newpos
+            w.update_path()
+            return newpos  # tell Qt the new snapped/orthogonal position
+        return super().itemChange(change, value)
