@@ -54,6 +54,11 @@ class AddWireCommand(QUndoCommand):
 
     def redo(self):
         self.scene.addItem(self.wire)
+        if hasattr(self.wire, "attach"):
+            try:
+                self.wire.attach()
+            except Exception:
+                pass
         theme = getattr(self.scene, "theme", None)
         if theme and hasattr(self.wire, "apply_theme"):
             self.wire.apply_theme(theme)
@@ -63,6 +68,11 @@ class AddWireCommand(QUndoCommand):
 
 
     def undo(self):
+        if hasattr(self.wire, "detach"):
+            try:
+                self.wire.detach(self.scene)
+            except Exception:
+                pass
         self.scene.removeItem(self.wire)
         if hasattr(self.scene, "_rebuild_junction_markers"):
             self.scene._rebuild_junction_markers()
