@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Optional, List, Dict, Tuple
 import json, math
 from PySide6.QtCore import Qt, QPointF, QRectF
-from PySide6.QtGui import QPen, QPainterPath, QTransform, QPainter
-from PySide6.QtWidgets import QGraphicsScene, QLabel, QGraphicsView, QGraphicsItem
+from PySide6.QtGui import QPen, QPainterPath, QTransform, QPainter, QBrush
+from PySide6.QtWidgets import QGraphicsScene, QLabel, QGraphicsView, QGraphicsItem, QGraphicsEllipseItem
 from .graphics_items import ComponentItem, PortItem
 from .commands import SetWirePointsCommand
 from typing import TYPE_CHECKING
@@ -48,6 +48,7 @@ class SchematicScene(QGraphicsScene):
         self._route_start_port = None # PortItem or None if starting from free/junction point
         self._route_start_point: Optional[QPointF] = None
         self._temp_dash = None        # QGraphicsPathItem (you already use one)
+        self._junction_markers: list[QGraphicsItem] = []
 
 
     def apply_theme(self, theme: "Theme"):
@@ -63,6 +64,7 @@ class SchematicScene(QGraphicsScene):
             if hasattr(it, "apply_theme"):
                 it.apply_theme(theme)
         self.update()
+        self._rebuild_junction_markers()
 
     def drawBackground(self, p: 'QPainter', rect: QRectF):
         if not self.grid_on: return
@@ -132,6 +134,49 @@ class SchematicScene(QGraphicsScene):
     def _remove_ghost(self):
         if self._ghost_item is not None:
             self.removeItem(self._ghost_item); self._ghost_item = None; self._ghost_kind = None
+
+    def _rebuild_junction_markers(self):
+        """Show a dot where two or more wires share the exact same point."""
+
+        # Clear existing markers first
+        for dot in list(self._junction_markers):
+            try:
+                self.removeItem(dot)
+            except Exception:
+                pass
+        self._junction_markers.clear()
+
+        if _WireItem is None:
+            return
+
+        wires = [it for it in self.items() if isinstance(it, _WireItem)]
+        if len(wires) < 2:
+            return
+
+        point_wires: Dict[Tuple[float, float], set[int]] = {}
+        for w in wires:
+            seen = set()
+            for p in w._manhattan_points():
+                key = (round(p.x(), 4), round(p.y(), 4))
+                if key in seen:
+                    continue
+                seen.add(key)
+                point_wires.setdefault(key, set()).add(id(w))
+
+        for (x, y), owners in point_wires.items():
+            if len(owners) < 2:
+                continue
+            r = 4.0
+            dot = QGraphicsEllipseItem(x - r, y - r, 2 * r, 2 * r)
+            pen_color = self.theme.wire if self.theme else Qt.black
+            pen = QPen(pen_color, 2)
+            pen.setCosmetic(True)
+            dot.setPen(pen)
+            dot.setBrush(QBrush(pen_color))
+            dot.setZValue(2)
+            dot.setAcceptedMouseButtons(Qt.NoButton)
+            self.addItem(dot)
+            self._junction_markers.append(dot)
 
     def _snap_point(self, p: QPointF) -> QPointF:
         if not self.snap_on: return p
@@ -203,6 +248,8 @@ class SchematicScene(QGraphicsScene):
         if getattr(self, "theme", None):
             pen.setColor(self.theme.wire_selected if self.theme else pen.color())
         self._temp_dash.setPen(pen)
+        self._temp_dash.setZValue(-1) # keep below wires so clicks hit targets
+        self._temp_dash.setAcceptedMouseButtons(Qt.NoButton)
         self.addItem(self._temp_dash)
 
     def _clear_temp_wire(self):
@@ -281,7 +328,7 @@ class SchematicScene(QGraphicsScene):
             self._ghost_item.setPos(self._snap_point(e.scenePos()))
         if self.mode == SchematicScene.Mode.WIRE and self._routing and self._temp_dash is not None:
             # build a Manhattan L-segment from last anchor to cursor
-            start = self._route_start_port.scenePos() if self._route_start_port else (self.route_start_point or QPointF())
+            start = self._route_start_port.scenePos() if self._route_start_port else (self._route_start_point or QPointF())
             last  = start if not self._route_pts else self._route_pts[-1]
             cur   = e.scenePos()
             mid   = QPointF(cur.x(), last.y())       # orthogonal dog-leg
@@ -385,7 +432,7 @@ class SchematicScene(QGraphicsScene):
             if b:
                 entry['b'] = [b[0], b[1]]
             elif getattr(w, "_end_point", None) is not None:
-                entry['b_point'] = {'x': float(w._start_point.x()), 'y': float(w._start_point.y())}
+                entry['b_point'] = {'x': float(w._end_point.x()), 'y': float(w._end_point.y())}
 
             wire_data.append(entry)
         return {
@@ -441,7 +488,9 @@ class SchematicScene(QGraphicsScene):
                 if self.theme and hasattr(wire, "apply_theme"):
                     wire.apply_theme(self.theme)
             except Exception: pass
-        self._reseed_refseq(); self.update()
+        self._reseed_refseq()
+        self._rebuild_junction_markers()
+        self.update()
 
     def _is_insert_modifier(self, e) -> bool:
         mods = e.modifiers()

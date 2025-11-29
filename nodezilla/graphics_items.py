@@ -385,7 +385,9 @@ class WireItem(QGraphicsPathItem):
         for q in pts[1:]:
             p.lineTo(q)
         self.setPath(p)
-
+        sc = self.scene()
+        if sc and hasattr(sc, "_rebuild_junction_markers"):
+            sc._rebuild_junction_markers()
     def shape(self):
         stroker = QPainterPathStroker()
         stroker.setWidth(12)            # easier to click

@@ -58,10 +58,14 @@ class AddWireCommand(QUndoCommand):
         if theme and hasattr(self.wire, "apply_theme"):
             self.wire.apply_theme(theme)
         self.wire.setSelected(True)
+        if hasattr(self.scene, "_rebuild_junction_markers"):
+            self.scene._rebuild_junction_markers()
 
 
     def undo(self):
         self.scene.removeItem(self.wire)
+        if hasattr(self.scene, "_rebuild_junction_markers"):
+            self.scene._rebuild_junction_markers()
 
 
 class MoveComponentCommand(QUndoCommand):
@@ -135,6 +139,8 @@ class DeleteItemsCommand(QUndoCommand):
             if hasattr(w, "detach"):  # detach from ports
                 w.detach(self.scene)
             self.scene.removeItem(w)  # ✅ actually remove from scene
+        if hasattr(self.scene, "_rebuild_junction_markers"):
+            self.scene._rebuild_junction_markers()
 
         for c in self._comps:
             self.scene.removeItem(c)  # components go after wires
@@ -152,6 +158,8 @@ class DeleteItemsCommand(QUndoCommand):
             # ensure the path reflects current port positions
             if hasattr(w, "update_path"):
                 w.update_path()
+        if hasattr(self.scene, "_rebuild_junction_markers"):
+            self.scene._rebuild_junction_markers()
 
 class SetWirePointsCommand(QUndoCommand):
     def __init__(self, wire, new_pts):
