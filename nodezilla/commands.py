@@ -9,12 +9,12 @@ from .graphics_items import ComponentItem, PortItem
 
 # For type hints only (never executed at runtime)
 if TYPE_CHECKING:
-    from graphics_items import WireItem as WireType
+    from .graphics_items import WireItem as WireType
 
 # For runtime isinstance checks (may be None during import)
 try:
-    from graphics_items import ComponentItem as _ComponentItem
-    from graphics_items import WireItem as _WireItem
+    from .graphics_items import ComponentItem as _ComponentItem
+    from .graphics_items import WireItem as _WireItem
 except Exception:
     _WireItem = None  # type: ignore
     _ComponentItem = _WireItem = None

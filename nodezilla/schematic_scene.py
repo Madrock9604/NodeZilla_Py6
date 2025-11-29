@@ -45,7 +45,8 @@ class SchematicScene(QGraphicsScene):
         self._grid_pen_dots  = QPen(Qt.lightGray, 2)
         self._routing = False
         self._route_pts = []          # waypoints between endpoints (QPointF)
-        self._route_start_port = None # PortItem
+        self._route_start_port = None # PortItem or None if starting from free/junction point
+        self._route_start_point: Optional[QPointF] = None
         self._temp_dash = None        # QGraphicsPathItem (you already use one)
 
 
@@ -110,7 +111,7 @@ class SchematicScene(QGraphicsScene):
         self.component_to_place = None
         self._remove_ghost(); self._clear_temp_wire()
         if self._view: self._view.setDragMode(QGraphicsView.RubberBandDrag)
-        self.status_label.setText("Wire: click two ports to connect (Esc/right-click to cancel)")
+        self.status_label.setText("Wire: click ports or wires, double click to finish (Esc/right-click to cancel)")
 
     # helpers
     def _ensure_ghost(self):
@@ -140,6 +141,57 @@ class SchematicScene(QGraphicsScene):
         ports = [comp.port_left, comp.port_right]
         dists = [(p, (p.scenePos()-to_scene).manhattanLength()) for p in ports]
         return min(dists, key=lambda t: t[1])[0]
+
+    def _prepare_wire_anchor(self, wire: "_WireItem", raw_pos: QPointF) -> QPointF:
+        """Snap to the nearest point on the drawn wire and insert a junction waypoint."""
+
+        spine = wire._manhattan_points()
+        if len(spine) < 2:
+            snapped = self._snap_point(raw_pos)
+            wire.set_points([snapped])
+            return snapped
+
+        # Find the closest point on any rendered segment (already orthogonal)
+        best_d2 = float("inf"); insert_idx = 0; best_q = spine[0]
+        for i in range(len(spine) - 1):
+            a, b = spine[i], spine[i + 1]
+            abx, aby = (b.x() - a.x()), (b.y() - a.y())
+            ab2 = abx * abx + aby * aby
+            if ab2 == 0:
+                q = a
+            else:
+                t = ((raw_pos.x() - a.x()) * abx + (raw_pos.y() - a.y()) * aby) / ab2
+                t = 0.0 if t < 0 else 1.0 if t > 1 else t
+                q = QPointF(a.x() + t * abx, a.y() + t * aby)
+            d2 = (q.x() - raw_pos.x()) ** 2 + (q.y() - raw_pos.y()) ** 2
+            if d2 < best_d2:
+                best_d2, best_q, insert_idx = d2, q, i
+
+        snapped = self._snap_point(best_q)
+
+        # Insert the anchor into the spine (between insert_idx and insert_idx+1)
+        new_spine = list(spine)
+        if snapped != new_spine[insert_idx] and snapped != new_spine[insert_idx + 1]:
+            new_spine.insert(insert_idx + 1, snapped)
+
+        # Collapse redundant collinear points so the junction is clean
+        def _collapse(pts: List[QPointF]) -> List[QPointF]:
+            if len(pts) <= 2:
+                return pts
+            clean = [pts[0]]
+            for i in range(1, len(pts) - 1):
+                prev, cur, nxt = pts[i - 1], pts[i], pts[i + 1]
+                same_x = prev.x() == cur.x() == nxt.x()
+                same_y = prev.y() == cur.y() == nxt.y()
+                if not (same_x or same_y):
+                    clean.append(cur)
+            clean.append(pts[-1])
+            return clean
+
+        new_spine = _collapse(new_spine)
+        # Strip endpoints before storing back on the wire
+        wire.set_points(new_spine[1:-1])
+        return snapped
 
     def _start_temp_wire(self):
         from PySide6.QtWidgets import QGraphicsPathItem
@@ -180,28 +232,43 @@ class SchematicScene(QGraphicsScene):
         if self.mode == SchematicScene.Mode.WIRE:
             # Right-click cancels temp wire (keep your existing code)
             if e.button() == Qt.RightButton:
-                if self._pending_port or getattr(self, '_temp_dash', None): self._clear_temp_wire()
+                if self._pending_port or getattr(self, '_temp_dash', None):
+                    self._clear_temp_wire()
+                    self._routing = False
+                    self._route_pts.clear()
+                    self._route_start_port = None
+                    self._route_start_point = None
                 e.accept(); return
 
             if e.button() == Qt.LeftButton:
                 item = self.itemAt(scene_pos, QTransform())
                 port = item if isinstance(item, PortItem) else (self._nearest_port(item, scene_pos) if isinstance(item, ComponentItem) else None)
+                wire = item if (_WireItem is not None and isinstance(item, _WireItem)) else None
 
                 if not self._routing:
-                    # must start from a port
-                    if port is None:
-                        # (optional) beep or status hint
+                    #Start from a port or an existing wire anchor
+                    if port is None and wire is None:
                         e.accept(); return
                     self._routing = True
                     self._route_pts = []                 # clear waypoints
-                    self._route_start_port = port        # lock start
+                    if wire is not None:
+                        anchor = self._prepare_wire_anchor(wire, scene_pos)
+                        self._route_start_port = None
+                        self._route_start_point = anchor
+                    else:
+                        self._route_start_port = port
+                        self._route_start_point = None
                     self._start_temp_wire()              # create dashed preview path
                     e.accept(); return
                 else:
                     # we are routing
                     # finish if we clicked a different port
                     if port is not None and port is not self._route_start_port:
-                        self._finish_routed_wire(port)   # implement below
+                        self._finish_routed_wire(end_port=port)
+                        e.accept(); return
+                    if wire is not None:
+                        anchor = self._prepare_wire_anchor(wire, scene_pos)
+                        self._finish_routed_wire(end_port=None, end_point=anchor)
                         e.accept(); return
 
                     # otherwise, drop a snapped corner
@@ -214,7 +281,7 @@ class SchematicScene(QGraphicsScene):
             self._ghost_item.setPos(self._snap_point(e.scenePos()))
         if self.mode == SchematicScene.Mode.WIRE and self._routing and self._temp_dash is not None:
             # build a Manhattan L-segment from last anchor to cursor
-            start = self._route_start_port.scenePos()
+            start = self._route_start_port.scenePos() if self._route_start_port else (self.route_start_point or QPointF())
             last  = start if not self._route_pts else self._route_pts[-1]
             cur   = e.scenePos()
             mid   = QPointF(cur.x(), last.y())       # orthogonal dog-leg
@@ -252,7 +319,12 @@ class SchematicScene(QGraphicsScene):
             if e.key() == Qt.Key_Escape:
                 self.set_mode_select(); e.accept(); return
         if self.mode == SchematicScene.Mode.WIRE and e.key() == Qt.Key_Escape:
-            if self._pending_port or getattr(self, '_temp_dash', None): self._clear_temp_wire()
+            if self._pending_port or getattr(self, '_temp_dash', None):
+                self._clear_temp_wire()
+                self._routing = False
+                self._route_pts.clear()
+                self._route_start_port = None
+                self._route_start_point = None
             else: self.set_mode_select()
             e.accept(); return
         super().keyPressEvent(e)
@@ -300,14 +372,22 @@ class SchematicScene(QGraphicsScene):
         for w in wires:
             a = port_ref.get(w.port_a)
             b = port_ref.get(w.port_b)
-            if a and b:
-                # NEW: include waypoints (if any)
-                pts = getattr(w, "_pts", [])
-                wire_data.append({
-                    'a': [a[0], a[1]],
-                    'b': [b[0], b[1]],
-                    'points': [{'x': float(p.x()), 'y': float(p.y())} for p in pts],
-                })
+            #Include waypoints (if any) and free endpoints
+            pts = getattr(w, "_pts", [])
+            entry = {
+                'points': [{'x': float(p.x()), 'y': float(p.y())} for p in pts]
+            }
+            if a:
+                entry['a'] = [a[0], a[1]]
+            elif getattr(w, "_start_point", None) is not None:
+                entry['a_point'] = {'x': float(w._start_point.x()), 'y': float(w._start_point.y())}
+
+            if b:
+                entry['b'] = [b[0], b[1]]
+            elif getattr(w, "_end_point", None) is not None:
+                entry['b_point'] = {'x': float(w._start_point.x()), 'y': float(w._start_point.y())}
+
+            wire_data.append(entry)
         return {
         'components': [{
             'kind': c.kind,
@@ -337,11 +417,23 @@ class SchematicScene(QGraphicsScene):
             self.addItem(c); comps.append(c)
         for wdata in data.get('wires', []):
             (ai, aside) = wdata.get('a', [None, None]); (bi, bside) = wdata.get('b', [None, None])
+            a_point = wdata.get('a_point'); b_point = wdata.get('b_point')
             try:
-                ca = comps[ai]; cb = comps[bi]
-                pa = ca.port_left if aside == 'A' else ca.port_right
-                pb = cb.port_left if bside == 'A' else cb.port_right
-                wire = WireItem(pa, pb)
+                pa = pb = None
+                start_point = end_point = None
+                if ai is not None and aside is not None:
+                    ca = comps[ai]
+                    pa = ca.port_left if aside == 'A' else ca.port_right
+                elif a_point:
+                    start_point = QPointF(a_point['x'], a_point['y'])
+
+                if bi is not None and bside is not None:
+                    cb = comps[bi]
+                    pb = cb.port_left if bside == 'A' else cb.port_right
+                elif b_point:
+                    end_point = QPointF(b_point['x'], b_point['y'])
+
+                wire = WireItem(pa, pb, start_point=start_point, end_point=end_point, theme=getattr(self, "theme", None))
                 pts = [QPointF(d['x'], d['y']) for d in wdata.get('points', [])]
                 if pts:
                     wire.set_points(pts)
@@ -356,11 +448,18 @@ class SchematicScene(QGraphicsScene):
         # Accept Option/Alt, Shift, or Command (Meta on macOS)
         return bool(mods & (Qt.AltModifier | Qt.ShiftModifier | Qt.MetaModifier))
     
-    def _finish_routed_wire(self, end_port: "PortItem"):
+    def _finish_routed_wire(self, *, end_port: "PortItem" | None = None, end_point: QPointF | None = None):
         from .graphics_items import WireItem
         from .commands import AddWireCommand, SetWirePointsCommand
 
-        w = WireItem(self._route_start_port, end_port, theme=getattr(self, "theme", None))
+        w = WireItem(
+            self._route_start_port, 
+            end_port, 
+            self._route_pts,
+            theme=getattr(self, "theme", None), 
+            start_point=self._route_start_point,
+            end_point=end_point,
+        )
         # push both: add wire + set waypoints (as a macro for clean undo)
         self.undo_stack.beginMacro("Add Routed Wire")
         self.undo_stack.push(AddWireCommand(self, w))
@@ -373,23 +472,23 @@ class SchematicScene(QGraphicsScene):
         self._routing = False
         self._route_pts = []
         self._route_start_port = None
+        self._route_start_point = None
 
     def mouseDoubleClickEvent(self, e):
         # Finish routed wire on double-click
         if self.mode == SchematicScene.Mode.WIRE and getattr(self, "_routing", False):
             item = self.itemAt(e.scenePos(), QTransform())
             end_port = item if isinstance(item, PortItem) else None
+            wire = item if (_WireItem is not None and isinstance(item, _WireItem)) else None
 
             if end_port and end_port is not self._route_start_port:
-                # finish to a port
-                self._finish_routed_wire(end_port)
+                self._finish_routed_wire(end_port=end_port)
+            elif wire is not None:
+                anchor = self._prepare_wire_anchor(wire, e.scenePos())
+                self._finish_routed_wire(end_port=None, end_point=anchor)
             else:
-                # no valid port under cursor → just cancel the preview for now
-                # (we’ll add “open end / junction” soon)
-                self._clear_temp_wire()
-                self._routing = False
-                self._route_pts.clear()
-                self._route_start_port = None
+                #Finish with a free endpoint at the double-click position
+                self._finish_routed_wire(end_point=self._snap_point(e.scenePos()))
 
             e.accept()
             return

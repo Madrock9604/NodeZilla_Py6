@@ -305,35 +305,41 @@ class ComponentItem(QGraphicsRectItem):
 
 
 class WireItem(QGraphicsPathItem):
-    def __init__(self, start_port: Optional[PortItem], end_port: Optional[PortItem], points: List[QPointF]):
+    def __init__(
+            self, 
+            start_port: Optional[PortItem], 
+            end_port: Optional[PortItem], 
+            points: List[QPointF] = None,
+            *,
+            theme: Theme | None = None,
+            start_point: QPointF | None = None,
+            end_point: QPointF | None = None,
+    ):
         super().__init__()
         self.setZValue(0)
-        pen = QPen(Qt.black, 2); pen.setCosmetic(True)
+        pen = QPen(Qt.black, 2)
+        pen.setCosmetic(True)
         self.setPen(pen)
 
         self.port_a = start_port
         self.port_b = end_port
-        self._points: List[QPointF] = list(points)     # waypoints only (no endpoints)
+        self._start_point = QPointF(start_point) if start_point is not None else None
+        self._end_point = QPointF(end_point) if end_point is not None else None
+        self._pts: List[QPointF] = list(points) if points else [] #waypoints only (no enpoints)
         self._handles: list[_Handle] = []
 
-        self.port_a.add_wire(self)
-        self.port_b.add_wire(self)
+        if self.port_a is not None:
+            self.port_a.add_wire(self)
+        if self.port_b is not None:
+            self.port_b.add_wire(self)
+
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
-        self.attach(None)
-
-        @property
-        def points(self) -> List[QPointF]:
-            return list(self._points)
-        
-        def _anchor_pos(self, port: Optional[PortItem], fallback: QPointF) -> QPointF:
-            return port.scenePos() if port is not None else fallback
-
-        # apply theme immediately if available
         if theme is None:
-            sc = a.scene() or b.scene()
+            sc = (self.port_a.scene() if self.port_a else None) or (self.port_b.scene() if self.port_b else None)
             theme = getattr(sc, "theme", None)
         if theme:
             self.apply_theme(theme)
+        self.update_path()
 
     # --- theming ---
     def apply_theme(self, theme: Theme, selected: bool | None = None):
@@ -356,8 +362,15 @@ class WireItem(QGraphicsPathItem):
         return super().itemChange(change, value)
 
     # --- geometry ---
+    def _endpoint_pos(self, port: Optional[PortItem], fallback: QPointF | None) -> QPointF:
+        if port is not None:
+            return port.scenePos()
+        if fallback is not None:
+            return QPointF(fallback)
+        return QPointF()
+    
     def points(self) -> list[QPointF]:
-        return [self.port_a.scenePos(), *self._pts, self.port_b.scenePos()]
+        return [self._endpoint_pos(self.port_a, self._start_point), *self._pts, self._endpoint_pos(self.port_b, self._end_point)]
 
     def set_points(self, pts: list[QPointF]):
         self._pts = pts[:] if pts else []
@@ -393,7 +406,7 @@ class WireItem(QGraphicsPathItem):
 
     # --- helpers for inserting a waypoint on nearest segment ---
     def closest_segment_point(self, p: QPointF) -> tuple[int, QPointF]:
-        pts = self.points()
+        pts = self._manhattan_points()
         best_d2 = float("inf"); insert_idx = 0; best_q = pts[0]
         for i in range(len(pts)-1):
             a, b = pts[i], pts[i+1]
@@ -455,8 +468,8 @@ class WireItem(QGraphicsPathItem):
         super().setSelected(sel)
         # If no explicit waypoints yet, materialize the current L-corner
         if sel and not self._pts:
-            a = self.port_a.scenePos()
-            b = self.port_b.scenePos()
+            a = self._endpoint_pos(self.port_a, self._start_point)
+            b = self._endpoint_pos(self.port_b, self._end_point)
             if a.x() != b.x() and a.y() != b.y():
                 corner = QPointF(b.x(), a.y())  # same “L” you display
                 self.set_points([corner])       # becomes draggable
@@ -476,8 +489,8 @@ class _Handle(QGraphicsEllipseItem):
             w = self.wire
             i = self.idx
             # neighbors (endpoints come from ports)
-            prev_pt = w.port_a.scenePos() if i == 0 else w._pts[i-1]
-            next_pt = w.port_b.scenePos() if i == len(w._pts)-1 else w._pts[i+1]
+            prev_pt = w._endpoint_pos(w.port_a, w._start_point) if i == 0 else w._pts[i-1]
+            next_pt = w._endpoint_pos(w.port_b, w._end_point) if i == len(w._pts)-1 else w._pts[i+1]
 
             # Constrain to Manhattan “cross”: choose the closer option
             cand1 = QPointF(prev_pt.x(), mouse.y())  # keep x aligned with prev, move y
