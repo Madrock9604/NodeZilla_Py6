@@ -115,8 +115,8 @@ class ComponentItem(QGraphicsRectItem):
     def __init__(self, kind: str, pos: QPointF):
         super().__init__(-COMP_WIDTH/2, -COMP_HEIGHT/2, COMP_WIDTH, COMP_HEIGHT)
         self.kind = kind
-        self.setBrush(QBrush(Qt.white))
-        self.setPen(QPen(Qt.black, 1.5))
+        self.setBrush(QBrush(Qt.NoBrush))
+        self.setPen(QPen(Qt.NoPen))
         self._theme: Theme | None = None
         self.setFlags(
             QGraphicsItem.ItemIsMovable |
@@ -159,8 +159,8 @@ class ComponentItem(QGraphicsRectItem):
 
     def apply_theme(self, theme: Theme):
         self._theme = theme
-        self.setBrush(QBrush(theme.component_fill))
-        self.setPen(QPen(theme.component_stroke, 1.5))
+        #self.setBrush(QBrush(theme.component_fill))
+        #self.setPen(QPen(theme.component_stroke, 1.5))
         # label: whichever attribute holds it (adjust name if different)
         if hasattr(self, "label") and self.label is not None:
             self.label.setDefaultTextColor(theme.text)
@@ -239,18 +239,36 @@ class ComponentItem(QGraphicsRectItem):
         center = br.center()
         self.symbol_item.setPos(-center.x() * scale, -center.y() * scale)
 
+        # Reposition ports to the ends of the symbol terminals
+        # Map the symbol's bounding rect into the ComponentItem's local coordinates
+        br_local = self.symbol_item.boundingRect()
+        br_mapped = self.symbol_item.mapRectToParent(br_local)
+        left_center = QPointF(br_mapped.left(), br_mapped.center().y())
+        right_center = QPointF(br_mapped.right(), br_mapped.center().y())
+
+        if hasattr(self, "port_left"):
+            self.port_left.setPos(left_center)
+        if hasattr(self, "port_right"):
+            self.port_right.setPos(right_center)
+
     def _apply_symbol_theme(self):
         if not self.symbol_item:
             return
 
         if self._theme:
+            #Lazily create the colorize effect without a QGraphicsItem parent
             if self._symbol_effect is None:
-                self._symbol_effect = QGraphicsColorizeEffect(self)
+                self._symbol_effect = QGraphicsColorizeEffect()
+                #Attach the effect to the SVG item
+                self.symbol_item.setGraphicsEffect(self._symbol_effect)
+
             self._symbol_effect.setColor(self._theme.component_stroke)
             self._symbol_effect.setStrength(1.0)
-            self.symbol_item.setGraphicsEffect(self._symbol_effect)
-        elif self.symbol_item.graphicsEffect():
-            self.symbol_item.setGraphicsEffect(None)
+        else:
+            #clear any existing effect if there is no theme
+            if self.symbol_item.graphicsEffect():
+                self.symbol_item.setGraphicsEffect(None)
+            self._symbol_effect = None
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionChange:
