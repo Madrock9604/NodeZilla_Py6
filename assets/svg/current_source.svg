@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg width="120" height="60" viewBox="-50 -25 100 50" xmlns="http://www.w3.org/2000/svg">
   <g fill="none" stroke="#1f2933" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-    <line x1="-50" y1="0" x2="-32" y2="0" />
-    <polyline points="-32,0 -24,-12 -16,12 -8,-12 0,12 8,-12 16,12 24,-12 32,0" />
-    <line x1="32" y1="0" x2="50" y2="0" />
+    <line x1="-50" y1="0" x2="-12" y2="0" />
+    <circle cx="0" cy="0" r="12" />
+    <line x1="12" y1="0" x2="50" y2="0" />
+    <path d="M 0 8 L 0 -8" />
+    <path d="M 0 -8 L -5 -2" />
+    <path d="M 0 -8 L 5 -2" />
   </g>
 </svg>

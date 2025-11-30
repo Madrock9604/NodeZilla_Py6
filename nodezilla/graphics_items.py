@@ -2,13 +2,15 @@
 # File: nodezilla/graphics_items.py
 # ========================================
 from __future__ import annotations
-from typing import Optional, List, Dict, Any
+from pathlib import Path
+from typing import Optional, List
 from PySide6.QtCore import Qt, QPointF, QRectF
-from PySide6.QtGui import QBrush, QPen, QPainter, QPainterPath, QPainterPathStroker
+from PySide6.QtGui import QBrush, QPen, QPainterPath, QPainterPathStroker
 from PySide6.QtWidgets import (
 QGraphicsItem, QGraphicsRectItem, QGraphicsEllipseItem, QGraphicsTextItem,
-QGraphicsPathItem
+QGraphicsPathItem, QGraphicsColorizeEffect
 )
+from PySide6.QtSvgWidgets import QGraphicsSvgItem
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .schematic_scene import SchematicScene
@@ -132,6 +134,10 @@ class ComponentItem(QGraphicsRectItem):
         self.label = InlineLabel(self)
         self.label.setZValue(3)
 
+        # svg symbol
+        self.symbol_item: QGraphicsSvgItem | None = None
+        self._symbol_effect: QGraphicsColorizeEffect | None = None
+
         # ports
         self.port_left = PortItem(self, 'A', QPointF(-COMP_WIDTH/2, 0))
         self.port_right = PortItem(self, 'B', QPointF(COMP_WIDTH/2, 0))
@@ -145,15 +151,20 @@ class ComponentItem(QGraphicsRectItem):
         self.setPos(pos)
         self._update_label()
 
+        # symbol artwork
+        self._load_symbol_graphic()
+
         # for undoable moves
         self._press_pos: Optional[QPointF] = None
 
     def apply_theme(self, theme: Theme):
+        self._theme = theme
         self.setBrush(QBrush(theme.component_fill))
         self.setPen(QPen(theme.component_stroke, 1.5))
         # label: whichever attribute holds it (adjust name if different)
         if hasattr(self, "label") and self.label is not None:
             self.label.setDefaultTextColor(theme.text)
+        self._apply_symbol_theme()
 
     def _update_label(self):
         from PySide6.QtWidgets import QApplication
@@ -181,74 +192,65 @@ class ComponentItem(QGraphicsRectItem):
     def boundingRect(self) -> QRectF:
         return super().boundingRect().adjusted(-14, -24, 14, 14)
 
-    def paint(self, p: QPainter, opt, widget=None):
-        super().paint(p, opt, widget)
-        p.setPen(QPen(Qt.black, 1.6))
-        r = self.rect()
+    def _symbol_path_for_kind(self) -> Optional[Path]:
+        base = Path(__file__).resolve().parent.parent / "assets" / "svg"
         k = self.kind.lower()
+        mapping = (
+            ("res", "resistor"),
+            ("cap", "capacitor"),
+            ("ind", "inductor"),
+            (("vsource", "vs"), "voltage_source"),
+            (("isource", "current"), "current_source"),
+            ("dio", "diode"),
+            (("ground", "gnd"), "ground"),
+        )
 
-        if k.startswith('res'):
-            path = QPainterPath(QPointF(r.left()+10, 0))
-            s = 10
-            for i in range(6):
-                y = -8 if i % 2 == 0 else 8
-                path.lineTo(path.currentPosition().x() + s, y)
-            path.lineTo(r.right()-10, 0)
-            p.drawPath(path)
+        for prefixes, filename in mapping:
+            if isinstance(prefixes, str):
+                prefixes = (prefixes,)
+            if any(k.startswith(pfx) for pfx in prefixes):
+                candidate = base / f"{filename}.svg"
+                return candidate if candidate.exists() else None
+        return None
 
-        elif k.startswith('cap'):
-            p.drawLine(r.left()+20, 0, -5, 0)
-            p.drawLine(-5, -12, -5, 12)
-            p.drawLine(5, -12, 5, 12)
-            p.drawLine(5, 0, r.right()-20, 0)
+    def _load_symbol_graphic(self):
+        path = self._symbol_path_for_kind()
+        if path is None:
+            self.symbol_item = None
+            return
 
-        elif k.startswith('vsource') or k.startswith('vs'):
-            p.setBrush(Qt.NoBrush)
-            p.drawLine(r.left()+15, 0, r.left()+30, 0)
-            p.drawEllipse(QPointF(0,0), 12, 12)
-            p.drawLine(-6, 0, 6, 0)
-            p.drawLine(0, -6, 0, 6)
-            p.drawLine(r.right()-30, 0, r.right()-15, 0)
+        self.symbol_item = QGraphicsSvgItem(str(path), self)
+        self.symbol_item.setZValue(2)
+        self._fit_symbol_to_body()
+        self._apply_symbol_theme()
 
-        elif k.startswith('ind'):
-            path = QPainterPath(QPointF(r.left()+15, 0))
-            step = (r.width()-30)/6.0
-            x = r.left()+15
-            for _ in range(4):
-                cx1 = x + step*0.5
-                cx2 = x + step
-                path.quadTo(QPointF(cx1, -10), QPointF(cx2, 0))
-                x += step
-            p.drawPath(path)
+    def _fit_symbol_to_body(self):
+        if not self.symbol_item:
+            return
+        br = self.symbol_item.boundingRect()
+        if br.isNull():
+            return
 
-        elif k.startswith('dio'):
-            tri_left = r.left()+20
-            tri_right = r.right()-25
-            path = QPainterPath(QPointF(tri_left, -12))
-            path.lineTo(tri_left, 12)
-            path.lineTo(tri_right, 0)
-            path.closeSubpath()
-            p.drawPath(path)
-            p.drawLine(tri_right, -14, tri_right, 14)
+        scale_x = (COMP_WIDTH - 12) / br.width()
+        scale_y = (COMP_HEIGHT - 12) / br.height()
+        scale = min(scale_x, scale_y)
+        self.symbol_item.setScale(scale)
 
-        elif k.startswith('ground') or k.startswith('gnd'):
-            base_y = r.bottom()-8
-            p.drawLine(0, base_y-18, 0, base_y-6)
-            p.drawLine(-14, base_y-6, 14, base_y-6)
-            p.drawLine(-10, base_y, 10, base_y)
-            p.drawLine(-6, base_y+6, 6, base_y+6)
+        center = br.center()
+        self.symbol_item.setPos(-center.x() * scale, -center.y() * scale)
 
-        elif k.startswith('isource') or k.startswith('current'):
-            p.setBrush(Qt.NoBrush)
-            p.drawLine(r.left()+15, 0, r.left()+30, 0)
-            p.drawEllipse(QPointF(0,0), 12, 12)
-            p.drawLine(0, 8, 0, -8)
-            p.drawLine(0, -8, -4, -2)
-            p.drawLine(0, -8, 4, -2)
-            p.drawLine(r.right()-30, 0, r.right()-15, 0)
+    def _apply_symbol_theme(self):
+        if not self.symbol_item:
+            return
 
-        else:
-            p.drawText(self.rect(), Qt.AlignCenter, self.kind)
+        if self._theme:
+            if self._symbol_effect is None:
+                self._symbol_effect = QGraphicsColorizeEffect()
+            self._symbol_effect.setColor(self._theme.component_stroke)
+            self._symbol_effect.setStrength(1.0)
+            self.symbol_item.setGraphicsEffect(self._symbol_effect)
+        elif self.symbol_item.graphicsEffect():
+            self.symbol_item.setGraphicsEffect(None)
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionChange:
