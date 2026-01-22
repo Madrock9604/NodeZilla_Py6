@@ -207,6 +207,12 @@ class MainWindow(QMainWindow):
         act_zoom_out.triggered.connect(lambda: self.schematic_tab.view.scale(1/1.15, 1/1.15))
         tb.addAction(act_zoom_out)
 
+        tb.addSeparator()
+        act_export_netlist = QAction("Export Netlist", self)
+        act_export_netlist.setShortcut("Ctrl+E")
+        act_export_netlist.triggered.connect(self._export_netlist)
+        tb.addAction(act_export_netlist)
+
     def _build_menu(self):
         fm = self.menuBar().addMenu("File")
 
@@ -224,6 +230,11 @@ class MainWindow(QMainWindow):
         act_save.setShortcut(QKeySequence.Save)
         act_save.triggered.connect(self._save)
         fm.addAction(act_save)
+
+        act_export_netlist = QAction("Export Netlist…", self)
+        act_export_netlist.setShortcut("Ctrl+E")
+        act_export_netlist.triggered.connect(self._export_netlist)
+        fm.addAction(act_export_netlist)
 
         fm.addSeparator()
         act_quit = QAction("Quit", self)
@@ -294,6 +305,31 @@ class MainWindow(QMainWindow):
             QMessageBox.Yes | QMessageBox.No
         ) == QMessageBox.Yes:
             self.schematic_tab.scene.load({'components': [], 'wires': [], 'settings': {}})
+
+    def _export_netlist(self):
+        """Generate a netlist from the current schematic and save it to a file."""
+        sc = self.schematic_tab.scene
+        # Uses SchematicScene.export_netlist_text() that we added earlier
+        try:
+            netlist_text = sc.export_netlist_text()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to build netlist: {e}")
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export netlist",
+            filter="Netlist (*.net *.cir);;All Files (*)"
+        )
+        if not path:
+            return
+
+        try:
+            with open(path, "w") as f:
+                f.write(netlist_text)
+            self.statusBar().showMessage(f"Netlist exported to {path}", 4000)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save netlist: {e}")
 
     def _open(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open schematic", filter="Schematic (*.json)")

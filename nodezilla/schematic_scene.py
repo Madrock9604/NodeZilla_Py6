@@ -408,6 +408,13 @@ class SchematicScene(QGraphicsScene):
         for k, v in counters.items(): self._refseq[k] = v + 1
 
     # persistence
+    
+    def export_netlist_text(self) -> str:
+        """Return a textual netlist for the current schematic."""
+        from .netlist_exporter import NetlistBuilder
+        builder = NetlistBuilder()
+        return builder.export(self)
+    
     def serialize(self) -> Dict:
         comps = [it for it in self.items() if isinstance(it, ComponentItem)]
         port_ref: Dict[PortItem, Tuple[int, str]] = {}
