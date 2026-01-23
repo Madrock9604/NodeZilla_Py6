@@ -271,6 +271,30 @@ class SchematicScene(QGraphicsScene):
         if a == b:
             return True
 
+        ax = a.x()
+        ay = a.y()
+        bx = b.x()
+        by = b.y()
+        tol = 1e-6
+        if abs(ax - bx) < tol or abs(ay - by) < tol:
+            if abs(ax - bx) < tol:
+                x = ax
+                y1, y2 = (ay, by) if ay <= by else (by, ay)
+                for r in rects:
+                    rr = r.normalized().adjusted(-0.5, -0.5, 0.5, 0.5)
+                    if rr.left() - tol <= x <= rr.right() + tol:
+                        if not (y2 < rr.top() - tol or y1 > rr.bottom() + tol):
+                            return False
+            else:
+                y = ay
+                x1, x2 = (ax, bx) if ax <= bx else (bx, ax)
+                for r in rects:
+                    rr = r.normalized().adjusted(-0.5, -0.5, 0.5, 0.5)
+                    if rr.top() - tol <= y <= rr.bottom() + tol:
+                        if not (x2 < rr.left() - tol or x1 > rr.right() + tol):
+                            return False
+            return True
+        
         # Build a stroked path so "touching" an obstacle counts as a collision.
         # Width is tied to grid size but clamped to stay reasonable.
         gs = float(getattr(self, "grid_size", 20) or 20)
@@ -727,7 +751,16 @@ class SchematicScene(QGraphicsScene):
         from .commands import AddWireCommand, SetWirePointsCommand
 
         # Build obstacle map once (include all components; endcaps are pushed outside)
-        rects = self._obstacle_rects(pad=max(6.0, float(getattr(self, "grid_size", 20)) * 0.35), exclude=set())
+        exclude: set[ComponentItem] = set()
+        if self._route_start_port is not None:
+            parent = self._route_start_port.parentItem()
+            if isinstance(parent, ComponentItem):
+                exclude.add(parent)
+        if end_port is not None:
+            parent = end_port.parentItem()
+            if isinstance(parent, ComponentItem):
+                exclude.add(parent)
+        rects = self._obstacle_rects(pad=max(6.0, float(getattr(self, "grid_size", 20)) * 0.35), exclude=exclude)
 
 
         # Determine the start/end anchors (ports or explicit points)

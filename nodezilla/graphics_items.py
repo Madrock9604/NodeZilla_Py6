@@ -570,7 +570,19 @@ class WireItem(QGraphicsPathItem):
             self._corner_mode = None
             return True
         return False
-    
+
+    def _endpoint_components(self) -> set[ComponentItem]:
+        comps: set[ComponentItem] = set()
+        if self.port_a is not None:
+            parent = self.port_a.parentItem()
+            if isinstance(parent, ComponentItem):
+                comps.add(parent)
+        if self.port_b is not None:
+            parent = self.port_b.parentItem()
+            if isinstance(parent, ComponentItem):
+                comps.add(parent)
+        return comps
+
     def points(self) -> list[QPointF]:
         # Endpoints (port positions) + optional escape caps + waypoints
         a_end = self._endpoint_pos(self.port_a, self._start_point)
@@ -651,7 +663,7 @@ class WireItem(QGraphicsPathItem):
                 rerouted = self._reroute_around_obstacles(rects)
                 if rerouted and self.isSelected():
                     self._rebuild_handles()
-                    
+
         pts = self._manhattan_points()
         if not pts:
             self.setPath(QPainterPath()); return
