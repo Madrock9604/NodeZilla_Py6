@@ -449,7 +449,128 @@ class WireItem(QGraphicsPathItem):
         sp = port.scenePos()
         return QPointF(sp.x() + dx * float(length), sp.y() + dy * float(length))
 
+    def _anchor_for_port(self, port: Optional[PortItem], fallback: QPointF | None, pad: float, cap_len: float) -> QPointF:
+        """Return an anchor outside the component body for routing."""
+        end = self._endpoint_pos(port, fallback)
+        if port is None:
+            return end
 
+        parent = port.parentItem()
+        if parent is None:
+            return end
+
+        lp = port.pos()
+        if abs(lp.x()) >= abs(lp.y()):
+            d_local = QPointF(-1.0 if lp.x() < 0 else 1.0, 0.0)
+        else:
+            d_local = QPointF(0.0, -1.0 if lp.y() < 0 else 1.0)
+
+        p0 = parent.mapToScene(QPointF(0.0, 0.0))
+        p1 = parent.mapToScene(d_local)
+        v = p1 - p0
+        if abs(v.x()) >= abs(v.y()):
+            dx, dy = (-1.0, 0.0) if v.x() < 0 else (1.0, 0.0)
+        else:
+            dx, dy = (0.0, -1.0) if v.y() < 0 else (0.0, 1.0)
+
+        try:
+            local = parent.boundingRect().united(parent.childrenBoundingRect())
+            obst = parent.mapRectToScene(local).normalized().adjusted(-pad, -pad, pad, pad)
+        except Exception:
+            obst = parent.sceneBoundingRect().normalized().adjusted(-pad, -pad, pad, pad)
+
+        gs = float(getattr(self.scene(), "grid_size", 20) or 20)
+        length = float(cap_len)
+        p = QPointF(end.x() + dx * length, end.y() + dy * length)
+        it = 0
+        while obst.contains(p) and it < 128:
+            length += gs
+            p = QPointF(end.x() + dx * length, end.y() + dy * length)
+            it += 1
+        return p
+
+    def _path_hits_obstacles(self, rects: list[QRectF]) -> bool:
+        sc = self.scene()
+        if not sc or not hasattr(sc, "_segment_clear"):
+            return False
+        gs = float(getattr(sc, "grid_size", 20) or 20)
+        pad = max(6.0, gs * 0.35)
+        cap_len = gs * 1.5
+        anchors = [
+            self._anchor_for_port(self.port_a, self._start_point, pad, cap_len),
+            *self._pts,
+            self._anchor_for_port(self.port_b, self._end_point, pad, cap_len),
+        ]
+        pts = self._manhattan_points_for(anchors)
+        for i in range(len(pts) - 1):
+            if not sc._segment_clear(pts[i], pts[i + 1], rects):
+                return True
+        return False
+
+    def _manhattan_points_for(self, pts: list[QPointF]) -> list[QPointF]:
+        """Return points with only 90° segments (insert doglegs as needed)."""
+        if not pts:
+            return []
+        out = [pts[0]]
+        for q in pts[1:]:
+            p = out[-1]
+            if p.x() == q.x() or p.y() == q.y():
+                out.append(q)
+            else:
+                out.append(QPointF(q.x(), p.y()))
+                out.append(q)
+        return out
+
+    def _reroute_around_obstacles(self, rects: list[QRectF]) -> bool:
+        sc = self.scene()
+        if not sc or not hasattr(sc, "_route_orthogonal"):
+            return False
+        if not rects:
+            return False
+
+        gs = float(getattr(sc, "grid_size", 20) or 20)
+        pad = max(6.0, gs * 0.35)
+        cap_len = gs * 1.5
+
+        a_end = self._endpoint_pos(self.port_a, self._start_point)
+        b_end = self._endpoint_pos(self.port_b, self._end_point)
+        a_anchor = self._anchor_for_port(self.port_a, self._start_point, pad, cap_len)
+        b_anchor = self._anchor_for_port(self.port_b, self._end_point, pad, cap_len)
+
+        anchors: list[QPointF] = []
+        snap = getattr(sc, "_snap_point", None)
+        def _snap(p: QPointF) -> QPointF:
+            return snap(p) if snap and getattr(sc, "snap_on", True) else p
+
+        anchors.append(_snap(a_anchor))
+        for p in self._pts:
+            anchors.append(_snap(p))
+        anchors.append(_snap(b_anchor))
+
+        routed: list[QPointF] = []
+        for i in range(len(anchors) - 1):
+            seg = sc._route_orthogonal(anchors[i], anchors[i + 1], rects)
+            if not routed:
+                routed.extend(seg)
+            else:
+                routed.extend(seg[1:])
+
+        routed = sc._simplify_points(routed) if hasattr(sc, "_simplify_points") else routed
+        if not routed:
+            return False
+
+        pts = routed[:]
+        if self.port_a is None and pts and (pts[0] - a_end).manhattanLength() < 1e-6:
+            pts = pts[1:]
+        if self.port_b is None and pts and (pts[-1] - b_end).manhattanLength() < 1e-6:
+            pts = pts[:-1]
+
+        if pts != self._pts:
+            self._pts = pts
+            self._corner_mode = None
+            return True
+        return False
+    
     def points(self) -> list[QPointF]:
         # Endpoints (port positions) + optional escape caps + waypoints
         a_end = self._endpoint_pos(self.port_a, self._start_point)
@@ -519,6 +640,18 @@ class WireItem(QGraphicsPathItem):
                             self._corner_mode = "HV"
                     self._pts[0] = QPointF(b.x(), a.y()) if self._corner_mode == "HV" else QPointF(a.x(), b.y())
 
+        # If auto-routed and obstacles now intersect the path, reroute to avoid components.
+        sc = self.scene()
+        rerouted = False
+        if sc and not self._user_locked and hasattr(sc, "_obstacle_rects"):
+            gs = float(getattr(sc, "grid_size", 20) or 20)
+            pad = max(6.0, gs * 0.35)
+            rects = sc._obstacle_rects(pad=pad, exclude=set())
+            if rects and self._path_hits_obstacles(rects):
+                rerouted = self._reroute_around_obstacles(rects)
+                if rerouted and self.isSelected():
+                    self._rebuild_handles()
+                    
         pts = self._manhattan_points()
         if not pts:
             self.setPath(QPainterPath()); return
