@@ -38,7 +38,7 @@ class AddComponentCommand(QUndoCommand):
 
     def undo(self):
         # remove connected wires first
-        for port in (self.comp.port_left, self.comp.port_right):
+        for port in ([p for p in getattr(self.comp, 'ports', []) if p is not None] or [p for p in (getattr(self.comp, 'port_left', None), getattr(self.comp, 'port_right', None)) if p is not None]):
             for w in list(port.wires):
                 w.detach(self.scene)
                 self.scene.removeItem(w)
@@ -101,7 +101,7 @@ class RotateComponentCommand(QUndoCommand):
 
 
     def _refresh(self):
-        for port in (self.comp.port_left, self.comp.port_right):
+        for port in ([p for p in getattr(self.comp, 'ports', []) if p is not None] or [p for p in (getattr(self.comp, 'port_left', None), getattr(self.comp, 'port_right', None)) if p is not None]):
             for w in list(port.wires):
                 w.update_path()
         self.comp._update_label()

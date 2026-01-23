@@ -139,13 +139,20 @@ class ComponentItem(QGraphicsRectItem):
         self._symbol_effect: QGraphicsColorizeEffect | None = None
 
         # ports
-        self.port_left = PortItem(self, 'A', QPointF(-COMP_WIDTH/2, 0))
-        self.port_right = PortItem(self, 'B', QPointF(COMP_WIDTH/2, 0))
+        self.ports: List[PortItem] = []
         lk = self.kind.lower()
-        if lk.startswith('ground') or lk.startswith('gnd'):
-            p = QPointF(0, -COMP_HEIGHT/2)
-            self.port_left.setPos(p)
-            self.port_right.setPos(p)
+        is_ground = lk.startswith('ground') or lk.startswith('gnd')
+
+        # Most parts are 2-terminal; ground should be 1-terminal.
+        if is_ground:
+            p = PortItem(self, 'A', QPointF(0, -COMP_HEIGHT/2))
+            self.ports = [p]
+            self.port_left = p
+            self.port_right = None
+        else:
+            self.port_left = PortItem(self, 'A', QPointF(-COMP_WIDTH/2, 0))
+            self.port_right = PortItem(self, 'B', QPointF(COMP_WIDTH/2, 0))
+            self.ports = [self.port_left, self.port_right]
 
         # initial position + label
         self.setPos(pos)
@@ -190,7 +197,11 @@ class ComponentItem(QGraphicsRectItem):
         self._update_label()
 
     def boundingRect(self) -> QRectF:
-        return super().boundingRect().adjusted(-14, -24, 14, 14)
+        # Ensure the component's bounding rect encloses its body *and* children (symbol SVG, ports, labels).
+        base = QRectF(-COMP_WIDTH / 2, -COMP_HEIGHT / 2, COMP_WIDTH, COMP_HEIGHT)
+        r = base.united(self.childrenBoundingRect())
+        return r.adjusted(-14, -24, 14, 14)
+
 
     def _symbol_path_for_kind(self) -> Optional[Path]:
         base = Path(__file__).resolve().parent.parent / "assets" / "svg"
@@ -243,13 +254,18 @@ class ComponentItem(QGraphicsRectItem):
         # Map the symbol's bounding rect into the ComponentItem's local coordinates
         br_local = self.symbol_item.boundingRect()
         br_mapped = self.symbol_item.mapRectToParent(br_local)
-        left_center = QPointF(br_mapped.left(), br_mapped.center().y())
-        right_center = QPointF(br_mapped.right(), br_mapped.center().y())
 
-        if hasattr(self, "port_left"):
-            self.port_left.setPos(left_center)
-        if hasattr(self, "port_right"):
-            self.port_right.setPos(right_center)
+        # 2-terminal parts: left/right; 1-terminal (GND): top-center.
+        if getattr(self, "ports", None) and len(self.ports) == 1:
+            top_center = QPointF(br_mapped.center().x(), br_mapped.top())
+            self.ports[0].setPos(top_center)
+        else:
+            left_center = QPointF(br_mapped.left(), br_mapped.center().y())
+            right_center = QPointF(br_mapped.right(), br_mapped.center().y())
+            if getattr(self, "port_left", None) is not None:
+                self.port_left.setPos(left_center)
+            if getattr(self, "port_right", None) is not None:
+                self.port_right.setPos(right_center)
 
     def _apply_symbol_theme(self):
         if not self.symbol_item:
@@ -279,8 +295,8 @@ class ComponentItem(QGraphicsRectItem):
                 return QPointF(round(p.x()/g)*g, round(p.y()/g)*g)
 
         if change in (QGraphicsItem.ItemPositionHasChanged, QGraphicsItem.ItemTransformHasChanged):
-            if hasattr(self, 'port_left') and hasattr(self, 'port_right'):
-                for port in (self.port_left, self.port_right):
+            if getattr(self, 'ports', None):
+                for port in self.ports:
                     for w in list(port.wires):
                         w.update_path()
             self._update_label()
@@ -288,14 +304,14 @@ class ComponentItem(QGraphicsRectItem):
 
     def rotate_cw(self):
         self.setRotation((self.rotation() + 90) % 360)
-        for port in (self.port_left, self.port_right):
+        for port in getattr(self, 'ports', []):
             for w in list(port.wires):
                 w.update_path()
         self._update_label()
 
     def rotate_ccw(self):
         self.setRotation((self.rotation() - 90) % 360)
-        for port in (self.port_left, self.port_right):
+        for port in getattr(self, 'ports', []):
             for w in list(port.wires):
                 w.update_path()
         self._update_label()
@@ -334,6 +350,8 @@ class WireItem(QGraphicsPathItem):
             theme: Theme | None = None,
             start_point: QPointF | None = None,
             end_point: QPointF | None = None,
+            attach_end_waypoints: bool = False,
+            cap_len: float | None = None,
     ):
         super().__init__()
         self.setZValue(0)
@@ -345,8 +363,20 @@ class WireItem(QGraphicsPathItem):
         self.port_b = end_port
         self._start_point = QPointF(start_point) if start_point is not None else None
         self._end_point = QPointF(end_point) if end_point is not None else None
-        self._pts: List[QPointF] = list(points) if points else [] #waypoints only (no enpoints)
+        self._pts: List[QPointF] = list(points) if points else []  # waypoints only (no endpoints)
         self._handles: list[_Handle] = []
+
+        # Optional "escape" length (in scene units) to step away from the component body.
+        self._cap_len = float(cap_len) if cap_len is not None else 0.0
+
+        self._attach_end_waypoints = bool(attach_end_waypoints)
+        self._cap_vec_a: QPointF | None = None
+        self._cap_vec_b: QPointF | None = None
+
+        # Track whether the user explicitly edited the route (via handles)
+        self._user_locked = False
+        # Remember whether the single-corner route is HV (horizontal then vertical) or VH
+        self._corner_mode: str | None = None  # 'HV' or 'VH'
 
         if self.port_a is not None:
             self.port_a.add_wire(self)
@@ -388,16 +418,107 @@ class WireItem(QGraphicsPathItem):
         if fallback is not None:
             return QPointF(fallback)
         return QPointF()
-    
+
+    def _cap_point(self, port: Optional[PortItem], length: float) -> Optional[QPointF]:
+        """Return a small escape point away from the component body, so wires do not run through symbols.
+
+        IMPORTANT: do NOT use the component bounding-box center for direction (labels/children shift it).
+        Instead, derive direction from the port LOCAL position in the component coordinate system, map
+        that direction to scene (handles rotation), and finally snap it to the dominant scene axis.
+        """
+        if port is None or length <= 0:
+            return None
+        parent = port.parentItem()
+        if parent is None:
+            return None
+
+        lp = port.pos()
+        if abs(lp.x()) >= abs(lp.y()):
+            d_local = QPointF(-1.0 if lp.x() < 0 else 1.0, 0.0)
+        else:
+            d_local = QPointF(0.0, -1.0 if lp.y() < 0 else 1.0)
+
+        p0 = parent.mapToScene(QPointF(0.0, 0.0))
+        p1 = parent.mapToScene(d_local)
+        v = p1 - p0
+        if abs(v.x()) >= abs(v.y()):
+            dx, dy = (1.0, 0.0) if v.x() >= 0 else (-1.0, 0.0)
+        else:
+            dx, dy = (0.0, 1.0) if v.y() >= 0 else (0.0, -1.0)
+
+        sp = port.scenePos()
+        return QPointF(sp.x() + dx * float(length), sp.y() + dy * float(length))
+
+
     def points(self) -> list[QPointF]:
-        return [self._endpoint_pos(self.port_a, self._start_point), *self._pts, self._endpoint_pos(self.port_b, self._end_point)]
+        # Endpoints (port positions) + optional escape caps + waypoints
+        a_end = self._endpoint_pos(self.port_a, self._start_point)
+        b_end = self._endpoint_pos(self.port_b, self._end_point)
+
+        out: list[QPointF] = [a_end]
+
+        cap_a = self._cap_point(self.port_a, self._cap_len) if (self.port_a is not None and self._cap_len > 0) else None
+        if cap_a is not None and (cap_a - a_end).manhattanLength() > 1e-6:
+            out.append(cap_a)
+
+        out.extend(self._pts)
+
+        cap_b = self._cap_point(self.port_b, self._cap_len) if (self.port_b is not None and self._cap_len > 0) else None
+        if cap_b is not None and (cap_b - b_end).manhattanLength() > 1e-6:
+            out.append(cap_b)
+
+        out.append(b_end)
+
+        # drop consecutive duplicates
+        cleaned = [out[0]]
+        for p in out[1:]:
+            if (p - cleaned[-1]).manhattanLength() > 1e-6:
+                cleaned.append(p)
+        return cleaned
 
     def set_points(self, pts: list[QPointF]):
         self._pts = pts[:] if pts else []
+        self._corner_mode = None
+        self._user_locked = False
         self.update_path()
         self._rebuild_handles()
 
     def update_path(self):
+        # Keep endcap waypoints attached to moving ports (if enabled).
+        if getattr(self, "_attach_end_waypoints", False):
+            a_end = self._endpoint_pos(self.port_a, self._start_point)
+            b_end = self._endpoint_pos(self.port_b, self._end_point)
+            if self.port_a is not None and len(self._pts) >= 1:
+                if self._cap_vec_a is None:
+                    self._cap_vec_a = self._pts[0] - a_end
+                self._pts[0] = a_end + self._cap_vec_a
+            if self.port_b is not None and len(self._pts) >= 1:
+                if self._cap_vec_b is None:
+                    self._cap_vec_b = self._pts[-1] - b_end
+                self._pts[-1] = b_end + self._cap_vec_b
+
+        # Auto-adjust a single corner waypoint so wires shrink/grow when endpoints move.
+        if (not self._user_locked) and len(self._pts) == 1:
+            pts_full = self.points()
+            if len(pts_full) >= 2:
+                # use the "routable" endpoints: if caps exist, they are included in pts_full
+                a = pts_full[0]
+                b = pts_full[-1]
+                # If aligned, no corner needed
+                if abs(a.x() - b.x()) < 1e-6 or abs(a.y() - b.y()) < 1e-6:
+                    self._pts = []
+                else:
+                    w = self._pts[0]
+                    if self._corner_mode is None:
+                        # infer based on current waypoint shape
+                        if abs(w.x() - b.x()) < 1e-6 and abs(w.y() - a.y()) < 1e-6:
+                            self._corner_mode = "HV"
+                        elif abs(w.x() - a.x()) < 1e-6 and abs(w.y() - b.y()) < 1e-6:
+                            self._corner_mode = "VH"
+                        else:
+                            self._corner_mode = "HV"
+                    self._pts[0] = QPointF(b.x(), a.y()) if self._corner_mode == "HV" else QPointF(a.x(), b.y())
+
         pts = self._manhattan_points()
         if not pts:
             self.setPath(QPainterPath()); return
@@ -408,6 +529,7 @@ class WireItem(QGraphicsPathItem):
         sc = self.scene()
         if sc and hasattr(sc, "_rebuild_junction_markers"):
             sc._rebuild_junction_markers()
+
     def shape(self):
         stroker = QPainterPathStroker()
         stroker.setWidth(12)            # easier to click
@@ -445,7 +567,7 @@ class WireItem(QGraphicsPathItem):
                 best_d2, best_q, insert_idx = d2, q, i
         # insert between pts[insert_idx] and pts[insert_idx+1]
         return insert_idx, best_q
-    
+
     def detach(self, scene):
         """Detach from ports and scene-safe cleanup."""
         # remove from each port’s wire list (if your PortItem exposes remove_wire)
@@ -490,15 +612,16 @@ class WireItem(QGraphicsPathItem):
         super().setSelected(sel)
         # If no explicit waypoints yet, materialize the current L-corner
         if sel and not self._pts:
-            a = self._endpoint_pos(self.port_a, self._start_point)
-            b = self._endpoint_pos(self.port_b, self._end_point)
-            if a.x() != b.x() and a.y() != b.y():
-                corner = QPointF(b.x(), a.y())  # same “L” you display
-                self.set_points([corner])       # becomes draggable
+            pts_full = self.points()
+            if len(pts_full) >= 2:
+                a = pts_full[0]
+                b = pts_full[-1]
+                if a.x() != b.x() and a.y() != b.y():
+                    corner = QPointF(b.x(), a.y())  # same “L” you display
+                    self.set_points([corner])       # becomes draggable
         # show/hide handles
         for h in getattr(self, "_handles", []):
             h.setVisible(sel)
-
 class _Handle(QGraphicsEllipseItem):
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionChange:
@@ -509,6 +632,7 @@ class _Handle(QGraphicsEllipseItem):
                 mouse = scene._snap_point(mouse)
 
             w = self.wire
+            w._user_locked = True
             i = self.idx
             # neighbors (endpoints come from ports)
             prev_pt = w._endpoint_pos(w.port_a, w._start_point) if i == 0 else w._pts[i-1]

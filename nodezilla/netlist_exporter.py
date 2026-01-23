@@ -214,7 +214,7 @@ class NetlistBuilder:
         # Map every port to its coordinate key and capture components for reporting.
         port_connections: Dict[Tuple[float, float], List[NetConnection]] = {}
         for comp in components:
-            for port in (comp.port_left, comp.port_right):
+            for port in [p for p in getattr(comp, 'ports', []) if p is not None] or [p for p in (getattr(comp, 'port_left', None), getattr(comp, 'port_right', None)) if p is not None]:
                 key = point_key(port.scenePos())
                 uf.add(key)
                 conn = NetConnection(

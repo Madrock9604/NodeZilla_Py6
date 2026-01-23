@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Optional, List, Dict, Tuple
 import json, math
 from PySide6.QtCore import Qt, QPointF, QRectF
-from PySide6.QtGui import QPen, QPainterPath, QTransform, QPainter, QBrush
+from PySide6.QtGui import QPen, QPainterPath, QPainterPathStroker, QTransform, QPainter, QBrush
 from PySide6.QtWidgets import QGraphicsScene, QLabel, QGraphicsView, QGraphicsItem, QGraphicsEllipseItem
 from .graphics_items import ComponentItem, PortItem
 from .commands import SetWirePointsCommand
@@ -183,9 +183,221 @@ class SchematicScene(QGraphicsScene):
         g = self.grid_size; return QPointF(round(p.x()/g)*g, round(p.y()/g)*g)
 
     def _nearest_port(self, comp: ComponentItem, to_scene: QPointF) -> PortItem:
-        ports = [comp.port_left, comp.port_right]
-        dists = [(p, (p.scenePos()-to_scene).manhattanLength()) for p in ports]
+        ports = [p for p in getattr(comp, 'ports', []) if p is not None]
+        if not ports:
+            # Fallback for legacy components
+            ports = [p for p in (getattr(comp, 'port_left', None), getattr(comp, 'port_right', None)) if p is not None]
+        dists = [(p, (p.scenePos() - to_scene).manhattanLength()) for p in ports]
         return min(dists, key=lambda t: t[1])[0]
+
+    def _pick_port_or_wire(self, scene_pos: QPointF):
+        """Hit test for wire mode.
+
+        Prefer the *nearest* PortItem within a small radius (grid-scaled). This solves:
+        - ports covered by the SVG/body (itemAt misses)
+        - clicks that are slightly off-center even though the port is highlighted
+        - accidentally picking the wrong terminal when two are close
+
+        Then allow selecting an existing wire, then fall back to component->nearest port.
+        """
+        gs = float(getattr(self, "grid_size", 20) or 20)
+        r = max(8.0, gs * 0.65)  # pick radius in scene units
+        pick_rect = QRectF(scene_pos.x() - r, scene_pos.y() - r, 2*r, 2*r)
+        items = self.items(pick_rect)
+
+        # 1) Nearest PortItem within radius
+        best_port = None
+        best_d = 1e18
+        for it in items:
+            if isinstance(it, PortItem):
+                d = (it.scenePos() - scene_pos).manhattanLength()
+                if d < best_d:
+                    best_d = d
+                    best_port = it
+        if best_port is not None:
+            return best_port, None
+
+        # 2) Wire hit (allow starting from an existing wire)
+        if _WireItem is not None:
+            for it in items:
+                if isinstance(it, _WireItem):
+                    return None, it
+
+        # 3) If we clicked on a child of a ComponentItem (e.g., SVG), climb parents and choose nearest port
+        comp = None
+        for it in items:
+            cur = it
+            while cur is not None:
+                if isinstance(cur, ComponentItem):
+                    comp = cur
+                    break
+                cur = cur.parentItem()
+            if comp is not None:
+                break
+        if comp is not None:
+            return self._nearest_port(comp, scene_pos), None
+
+        return None, None
+
+
+    def _obstacle_rects(self, *, pad: float = 6.0, exclude: set[ComponentItem] | None = None) -> list[QRectF]:
+        """Rects to avoid when routing wires.
+
+        Important: ComponentItem.boundingRect() in this project may *not* include child items (SVG symbol, ports, labels),
+        and QGraphicsItem.sceneBoundingRect() is based only on the item's own boundingRect().
+        So for routing we build obstacles from (boundingRect ∪ childrenBoundingRect) mapped into scene coords.
+
+        `exclude` lets us ignore the start/end components so their own body doesn't block the first/last segment.
+        """
+        rects: list[QRectF] = []
+        ex = exclude or set()
+        for it in self.items():
+            if isinstance(it, ComponentItem) and it not in ex:
+                try:
+                    local = it.boundingRect().united(it.childrenBoundingRect())
+                    r = it.mapRectToScene(local).normalized()
+                except Exception:
+                    r = it.sceneBoundingRect().normalized()
+                rects.append(r.adjusted(-pad, -pad, pad, pad))
+        return rects
+
+
+    def _segment_clear(self, a: QPointF, b: QPointF, rects: list[QRectF]) -> bool:
+        """Return True if an orthogonal segment a->b does not cross any obstacle rect.
+
+        This uses a stroked QPainterPath intersection test, which is much more robust than
+        thin-rectangle intersects checks for exact-on-grid segments.
+        """
+        if a == b:
+            return True
+
+        # Build a stroked path so "touching" an obstacle counts as a collision.
+        # Width is tied to grid size but clamped to stay reasonable.
+        gs = float(getattr(self, "grid_size", 20) or 20)
+        width = max(1.5, min(6.0, gs * 0.20))
+
+        path = QPainterPath()
+        path.moveTo(a)
+        path.lineTo(b)
+
+        stroker = QPainterPathStroker()
+        stroker.setWidth(width)
+        stroked = stroker.createStroke(path)
+
+        for r in rects:
+            rr = r.normalized()
+            # Inflate a little so we don't slip through on edges
+            rr = rr.adjusted(-0.5, -0.5, 0.5, 0.5)
+            if stroked.intersects(rr):
+                return False
+        return True
+    def _simplify_points(self, pts: list[QPointF]) -> list[QPointF]:
+        """Drop duplicates and collinear midpoints."""
+        if not pts:
+            return []
+        # drop consecutive duplicates
+        out = [pts[0]]
+        for p in pts[1:]:
+            if (p - out[-1]).manhattanLength() > 1e-6:
+                out.append(p)
+        # drop collinear
+        i = 1
+        while i < len(out) - 1:
+            a, b, c = out[i - 1], out[i], out[i + 1]
+            if (abs(a.x() - b.x()) < 1e-6 and abs(b.x() - c.x()) < 1e-6) or (abs(a.y() - b.y()) < 1e-6 and abs(b.y() - c.y()) < 1e-6):
+                out.pop(i)
+            else:
+                i += 1
+        return out
+
+    def _route_orthogonal(self, a: QPointF, b: QPointF, rects: list[QRectF]) -> list[QPointF]:
+        """Find a simple orthogonal path a->b avoiding obstacle rects.
+        Returns [a, ..., b] including endpoints.
+        """
+        gs = float(getattr(self, "grid_size", 20) or 20)
+
+        def snap(p: QPointF) -> QPointF:
+            if getattr(self, "snap_on", True):
+                return self._snap_point(p)
+            return p
+
+        a = snap(a); b = snap(b)
+
+        # Candidate 1: straight if aligned
+        if abs(a.x() - b.x()) < 1e-6 or abs(a.y() - b.y()) < 1e-6:
+            if self._segment_clear(a, b, rects):
+                return [a, b]
+
+        # Candidate 2: L-shapes (HV and VH)
+        mid_hv = QPointF(b.x(), a.y())
+        if self._segment_clear(a, mid_hv, rects) and self._segment_clear(mid_hv, b, rects):
+            return self._simplify_points([a, mid_hv, b])
+
+        mid_vh = QPointF(a.x(), b.y())
+        if self._segment_clear(a, mid_vh, rects) and self._segment_clear(mid_vh, b, rects):
+            return self._simplify_points([a, mid_vh, b])
+
+        # Candidate 3: try a few offset "channels"
+        # We generate candidates and pick the shortest; prefer routing "up" first (Qt scene Y grows downward).
+        best: list[QPointF] | None = None
+        best_len: float = 1e18
+        best_bends: int = 1_000_000
+        best_pref: int = 1_000_000  # smaller is better (up is 0, down is 1)
+
+        def manhattan_len(pts: list[QPointF]) -> float:
+            s = 0.0
+            for i in range(len(pts) - 1):
+                s += abs(pts[i+1].x() - pts[i].x()) + abs(pts[i+1].y() - pts[i].y())
+            return s
+
+        def bends(pts: list[QPointF]) -> int:
+            # count direction changes (after simplifying)
+            pts2 = self._simplify_points(pts)
+            bcount = 0
+            for i in range(1, len(pts2) - 1):
+                dx1 = pts2[i].x() - pts2[i-1].x()
+                dy1 = pts2[i].y() - pts2[i-1].y()
+                dx2 = pts2[i+1].x() - pts2[i].x()
+                dy2 = pts2[i+1].y() - pts2[i].y()
+                if (abs(dx1) > 1e-6 and abs(dy2) > 1e-6) or (abs(dy1) > 1e-6 and abs(dx2) > 1e-6):
+                    bcount += 1
+            return bcount
+
+        def consider(candidate: list[QPointF], pref_rank: int):
+            nonlocal best, best_len, best_bends, best_pref
+            cand = self._simplify_points(candidate)
+            L = manhattan_len(cand)
+            B = bends(cand)
+            if (L < best_len - 1e-6) or (abs(L - best_len) < 1e-6 and (B < best_bends or (B == best_bends and pref_rank < best_pref))):
+                best = cand
+                best_len = L
+                best_bends = B
+                best_pref = pref_rank
+
+        # Try horizontal channel (vary y): up first, then down
+        for k in range(1, 16):
+            for pref_rank, sign in ((0, -1), (1, 1)):
+                y = a.y() + sign * k * gs
+                p1 = snap(QPointF(a.x(), y))
+                p2 = snap(QPointF(b.x(), y))
+                if self._segment_clear(a, p1, rects) and self._segment_clear(p1, p2, rects) and self._segment_clear(p2, b, rects):
+                    consider([a, p1, p2, b], pref_rank)
+                    # small k already likely near-optimal, but keep searching for a shorter route if any
+
+        # Try vertical channel (vary x): left first, then right
+        for k in range(1, 16):
+            for pref_rank, sign in ((0, -1), (1, 1)):
+                x = a.x() + sign * k * gs
+                p1 = snap(QPointF(x, a.y()))
+                p2 = snap(QPointF(x, b.y()))
+                if self._segment_clear(a, p1, rects) and self._segment_clear(p1, p2, rects) and self._segment_clear(p2, b, rects):
+                    consider([a, p1, p2, b], 10 + pref_rank)
+
+        if best is not None:
+            return best
+
+        # Give up: return a simple L (still orthogonal)
+        return self._simplify_points([a, mid_hv, b])
 
     def _prepare_wire_anchor(self, wire: "_WireItem", raw_pos: QPointF) -> QPointF:
         """Snap to the nearest point on the drawn wire and insert a junction waypoint."""
@@ -288,9 +500,7 @@ class SchematicScene(QGraphicsScene):
                 e.accept(); return
 
             if e.button() == Qt.LeftButton:
-                item = self.itemAt(scene_pos, QTransform())
-                port = item if isinstance(item, PortItem) else (self._nearest_port(item, scene_pos) if isinstance(item, ComponentItem) else None)
-                wire = item if (_WireItem is not None and isinstance(item, _WireItem)) else None
+                port, wire = self._pick_port_or_wire(scene_pos)
 
                 if not self._routing:
                     #Start from a port or an existing wire anchor
@@ -419,7 +629,14 @@ class SchematicScene(QGraphicsScene):
         comps = [it for it in self.items() if isinstance(it, ComponentItem)]
         port_ref: Dict[PortItem, Tuple[int, str]] = {}
         for idx, c in enumerate(comps):
-            port_ref[c.port_left] = (idx, 'A'); port_ref[c.port_right] = (idx, 'B')
+            for p in [pp for pp in getattr(c, 'ports', []) if pp is not None]:
+                port_ref[p] = (idx, p.name)
+            # Backward-compatible fallback
+            if not any(k[0] == idx for k in port_ref.values()):
+                pl = getattr(c, 'port_left', None)
+                pr = getattr(c, 'port_right', None)
+                if pl is not None: port_ref[pl] = (idx, getattr(pl, 'name', 'A'))
+                if pr is not None: port_ref[pr] = (idx, getattr(pr, 'name', 'B'))
         # ✅ use runtime-safe wire check
         wires = [it for it in self.items() if (_WireItem is not None and isinstance(it, _WireItem))]
         wire_data = []
@@ -477,13 +694,13 @@ class SchematicScene(QGraphicsScene):
                 start_point = end_point = None
                 if ai is not None and aside is not None:
                     ca = comps[ai]
-                    pa = ca.port_left if aside == 'A' else ca.port_right
+                    pa = next((p for p in getattr(ca, 'ports', []) if getattr(p, 'name', None) == aside), None) or (getattr(ca, 'port_left', None) if aside == 'A' else getattr(ca, 'port_right', None))
                 elif a_point:
                     start_point = QPointF(a_point['x'], a_point['y'])
 
                 if bi is not None and bside is not None:
                     cb = comps[bi]
-                    pb = cb.port_left if bside == 'A' else cb.port_right
+                    pb = next((p for p in getattr(cb, 'ports', []) if getattr(p, 'name', None) == bside), None) or (getattr(cb, 'port_left', None) if bside == 'A' else getattr(cb, 'port_right', None))
                 elif b_point:
                     end_point = QPointF(b_point['x'], b_point['y'])
 
@@ -505,22 +722,116 @@ class SchematicScene(QGraphicsScene):
         return bool(mods & (Qt.AltModifier | Qt.ShiftModifier | Qt.MetaModifier))
     
     def _finish_routed_wire(self, *, end_port: "PortItem" | None = None, end_point: QPointF | None = None):
+        """Create a WireItem from the current routing state, with simple obstacle-avoiding orthogonal routing."""
         from .graphics_items import WireItem
         from .commands import AddWireCommand, SetWirePointsCommand
 
+        # Build obstacle map once (include all components; endcaps are pushed outside)
+        rects = self._obstacle_rects(pad=max(6.0, float(getattr(self, "grid_size", 20)) * 0.35), exclude=set())
+
+
+        # Determine the start/end anchors (ports or explicit points)
+        start_port = self._route_start_port
+        start_point = self._route_start_point
+        a_end = start_port.scenePos() if start_port is not None else (start_point or QPointF(0, 0))
+
+        if end_port is not None:
+            b_end = end_port.scenePos()
+        else:
+            b_end = end_point or QPointF(0, 0)
+
+        cap_len = float(getattr(self, "grid_size", 20)) * 1.5
+
+        def cap_point(port: PortItem, length: float) -> QPointF:
+            """Return a cap point guaranteed to be outside the component obstacle.
+
+            Direction is derived from the port LOCAL position (stable even when labels change bounds).
+            The local direction is mapped into scene (handles rotation) and snapped to the dominant
+            scene axis so routing stays orthogonal.
+            """
+            parent = port.parentItem()
+            if parent is None:
+                return port.scenePos()
+
+            sp = port.scenePos()
+
+            # 1) Choose a direction in parent-local coords based on port side
+            lp = port.pos()
+            if abs(lp.x()) >= abs(lp.y()):
+                d_local = QPointF(-1.0 if lp.x() < 0 else 1.0, 0.0)
+            else:
+                d_local = QPointF(0.0, -1.0 if lp.y() < 0 else 1.0)
+
+            # 2) Map to scene and snap to dominant axis
+            p0 = parent.mapToScene(QPointF(0.0, 0.0))
+            p1 = parent.mapToScene(d_local)
+            v = p1 - p0
+            if abs(v.x()) >= abs(v.y()):
+                dx, dy = (-1.0, 0.0) if v.x() < 0 else (1.0, 0.0)
+            else:
+                dx, dy = (0.0, -1.0) if v.y() < 0 else (0.0, 1.0)
+
+            # Ensure we step far enough to clear the component padded bounding box
+            gs_local = float(getattr(self, "grid_size", 20) or 20)
+            pad_local = max(6.0, gs_local * 0.35)
+            try:
+                local = parent.boundingRect().united(parent.childrenBoundingRect())
+                obst = parent.mapRectToScene(local).normalized().adjusted(-pad_local, -pad_local, pad_local, pad_local)
+            except Exception:
+                obst = parent.sceneBoundingRect().normalized().adjusted(-pad_local, -pad_local, pad_local, pad_local)
+
+            L = float(length)
+            p = QPointF(sp.x() + dx * L, sp.y() + dy * L)
+            it = 0
+            while obst.contains(p) and it < 128:
+                L += gs_local
+                p = QPointF(sp.x() + dx * L, sp.y() + dy * L)
+                it += 1
+            return p
+
+        a_anchor = cap_point(start_port, cap_len) if start_port is not None else a_end
+        b_anchor = cap_point(end_port, cap_len) if end_port is not None else b_end
+
+        # Build anchor list: start anchor -> (user corners) -> end anchor
+        anchors: list[QPointF] = [self._snap_point(a_anchor)]
+        for p in self._route_pts:
+            anchors.append(self._snap_point(p))
+        anchors.append(self._snap_point(b_anchor))
+
+        # Route between each consecutive anchor with obstacle avoidance
+        routed: list[QPointF] = []
+        for i in range(len(anchors) - 1):
+            seg = self._route_orthogonal(anchors[i], anchors[i + 1], rects)
+            if not routed:
+                routed.extend(seg)
+            else:
+                routed.extend(seg[1:])  # avoid dup
+        routed = self._simplify_points(routed)
+
+        # Store endcaps as explicit waypoints so WireItem.update_path() cannot "rebuild" a path that goes through symbols.
+        waypoints = routed[:] if routed else []
+        # Trim anchors that are actual free endpoints (no port) to avoid duplicating the true endpoints.
+        if start_port is None and waypoints:
+            waypoints = waypoints[1:]
+        if end_port is None and waypoints:
+            waypoints = waypoints[:-1]
+
         w = WireItem(
-            self._route_start_port, 
-            end_port, 
-            self._route_pts,
-            theme=getattr(self, "theme", None), 
-            start_point=self._route_start_point,
+            start_port,
+            end_port,
+            waypoints,
+            theme=getattr(self, "theme", None),
+            start_point=start_point,
             end_point=end_point,
+            cap_len=0.0,
+            attach_end_waypoints=bool(start_port is not None or end_port is not None),
         )
-        # push both: add wire + set waypoints (as a macro for clean undo)
+
+
         self.undo_stack.beginMacro("Add Routed Wire")
         self.undo_stack.push(AddWireCommand(self, w))
-        if self._route_pts:
-            self.undo_stack.push(SetWirePointsCommand(w, self._route_pts))
+        if waypoints:
+            self.undo_stack.push(SetWirePointsCommand(w, waypoints))
         self.undo_stack.endMacro()
 
         # reset temp state
@@ -529,7 +840,6 @@ class SchematicScene(QGraphicsScene):
         self._route_pts = []
         self._route_start_port = None
         self._route_start_point = None
-
     def mouseDoubleClickEvent(self, e):
         # Finish routed wire on double-click
         if self.mode == SchematicScene.Mode.WIRE and getattr(self, "_routing", False):
