@@ -4,7 +4,7 @@
 from __future__ import annotations
 from typing import Optional, List, Dict, Tuple
 import json, math
-from PySide6.QtCore import Qt, QPointF, QRectF
+from PySide6.QtCore import Qt, QPointF, QRectF, Signal, QTimer
 from PySide6.QtGui import QPen, QPainterPath, QPainterPathStroker, QTransform, QPainter, QBrush
 from PySide6.QtWidgets import QGraphicsScene, QLabel, QGraphicsView, QGraphicsItem, QGraphicsEllipseItem
 from .graphics_items import ComponentItem, PortItem
@@ -23,6 +23,8 @@ except Exception:
     _WireItem = None
 
 class SchematicScene(QGraphicsScene):
+    nets_changed = Signal()
+
     class Mode:
         SELECT = 0; PLACE = 1; WIRE = 2
 
@@ -49,6 +51,9 @@ class SchematicScene(QGraphicsScene):
         self._route_start_point: Optional[QPointF] = None
         self._temp_dash = None        # QGraphicsPathItem (you already use one)
         self._junction_markers: list[QGraphicsItem] = []
+        self._net_name_overrides: Dict[Tuple[float, float], str] = {}
+        self._net_update_pending = False
+        self.changed.connect(self._schedule_nets_changed)
 
 
     def apply_theme(self, theme: "Theme"):
@@ -65,6 +70,16 @@ class SchematicScene(QGraphicsScene):
                 it.apply_theme(theme)
         self.update()
         self._rebuild_junction_markers()
+
+    def _schedule_nets_changed(self):
+        if self._net_update_pending:
+            return
+        self._net_update_pending = True
+        QTimer.singleShot(0, self._emit_nets_changed)
+
+    def _emit_nets_changed(self):
+        self._net_update_pending = False
+        self.nets_changed.emit()
 
     def drawBackground(self, p: 'QPainter', rect: QRectF):
         if not self.grid_on: return
@@ -641,6 +656,94 @@ class SchematicScene(QGraphicsScene):
                 counters[key] = max(counters.get(key, 0), num)
         for k, v in counters.items(): self._refseq[k] = v + 1
 
+    def _net_point_key(self, p: QPointF) -> Tuple[float, float]:
+        return (round(p.x(), 4), round(p.y(), 4))
+
+    def net_data(self) -> List[Dict]:
+        """Return computed net metadata for panels and highlighting."""
+        from .netlist_exporter import NetConnection, NetlistBuilder, _UnionFind
+
+        components: List[ComponentItem] = [it for it in self.items() if isinstance(it, ComponentItem)]
+        wires = [it for it in self.items() if (_WireItem is not None and isinstance(it, _WireItem))]
+
+        uf = _UnionFind()
+        point_to_wires: Dict[Tuple[float, float], set] = {}
+
+        for wire in wires:
+            pts = wire._manhattan_points()
+            if not pts:
+                continue
+            keys = [self._net_point_key(p) for p in pts]
+            for key in keys:
+                uf.add(key)
+                point_to_wires.setdefault(key, set()).add(wire)
+            for key in keys[1:]:
+                uf.union(keys[0], key)
+
+        port_connections: Dict[Tuple[float, float], List[NetConnection]] = {}
+        for comp in components:
+            ports = [p for p in getattr(comp, 'ports', []) if p is not None] or [
+                p for p in (getattr(comp, 'port_left', None), getattr(comp, 'port_right', None))
+                if p is not None
+            ]
+            for port in ports:
+                key = self._net_point_key(port.scenePos())
+                uf.add(key)
+                conn = NetConnection(
+                    component_refdes=comp.refdes,
+                    component_kind=comp.kind,
+                    port_name=port.name,
+                )
+                port_connections.setdefault(key, []).append(conn)
+
+        nets: List[Dict] = []
+        live_keys: set[Tuple[float, float]] = set()
+        sequence = 0
+        for root, members in sorted(uf.groups().items()):
+            connections: List[NetConnection] = []
+            wires_for_net: set = set()
+            for m in members:
+                connections.extend(port_connections.get(m, []))
+                wires_for_net.update(point_to_wires.get(m, set()))
+            if not connections and not wires_for_net:
+                continue
+            sequence += 1
+            default_name = NetlistBuilder._default_net_namer(connections, sequence)
+            name = self._net_name_overrides.get(root, default_name)
+            nets.append({
+                "id": root,
+                "name": name,
+                "default_name": default_name,
+                "connections": connections,
+                "wires": list(wires_for_net),
+            })
+            live_keys.add(root)
+
+        stale_keys = set(self._net_name_overrides.keys()) - live_keys
+        for key in stale_keys:
+            self._net_name_overrides.pop(key, None)
+
+        return nets
+
+    def set_net_name(self, net_id: Tuple[float, float], name: str, default_name: str):
+        cleaned = name.strip()
+        if not cleaned or cleaned == default_name:
+            self._net_name_overrides.pop(net_id, None)
+        else:
+            self._net_name_overrides[net_id] = cleaned
+        self._schedule_nets_changed()
+
+    def highlight_net(self, net_id: Tuple[float, float]):
+        target = next((net for net in self.net_data() if net["id"] == net_id), None)
+        self.clearSelection()
+        if not target:
+            return
+        for wire in target["wires"]:
+            try:
+                wire.setSelected(True)
+            except Exception:
+                pass
+
     # persistence
     
     def export_netlist_text(self) -> str:
@@ -695,6 +798,10 @@ class SchematicScene(QGraphicsScene):
         'settings': {
             'grid_on': self.grid_on, 'grid_size': self.grid_size,
             'grid_style': self.grid_style, 'snap_on': self.snap_on,
+            'net_names': [
+                {'key': [float(k[0]), float(k[1])], 'name': v}
+                for k, v in self._net_name_overrides.items()
+            ],
         },
         '_format': 2,  # optional version tag
         }
@@ -704,6 +811,12 @@ class SchematicScene(QGraphicsScene):
         s = data.get('settings', {})
         self.grid_on = s.get('grid_on', self.grid_on); self.grid_size = s.get('grid_size', self.grid_size)
         self.grid_style = s.get('grid_style', self.grid_style); self.snap_on = s.get('snap_on', self.snap_on)
+        self._net_name_overrides = {}
+        for entry in s.get('net_names', []):
+            key = entry.get('key')
+            name = entry.get('name', "")
+            if isinstance(key, list) and len(key) == 2 and name:
+                self._net_name_overrides[(round(float(key[0]), 4), round(float(key[1]), 4))] = str(name)
         comps: List[ComponentItem] = []
         for cdata in data.get('components', []):
             kind = cdata['kind']; x, y = cdata['pos']; rot = cdata.get('rotation', 0)

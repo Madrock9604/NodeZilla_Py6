@@ -26,6 +26,11 @@ class SchematicView(QGraphicsView):
         if e.button() == Qt.MiddleButton:
             self._panning = True; self._pan_start = e.position(); self.setCursor(Qt.ClosedHandCursor)
             e.accept(); return
+        if e.button() == Qt.LeftButton:
+            if self.itemAt(e.position().toPoint()) is None:
+                sc = self.scene()
+                if sc is not None:
+                    sc.clearSelection()
         super().mousePressEvent(e)
 
     def mouseMoveEvent(self, e):

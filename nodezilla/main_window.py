@@ -13,6 +13,7 @@ import json
 from .schematic_scene import SchematicScene
 from .schematic_view import SchematicView
 from .properties_panel import PropertiesPanel
+from .net_panel import NetPanel
 from .graphics_items import ComponentItem
 from .commands import DeleteItemsCommand, RotateComponentCommand
 from .theme import ThemeWatcher
@@ -67,6 +68,15 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.RightDockWidgetArea, dock)
         self.props_dock = dock
 
+        self.net_panel = NetPanel()
+        self.net_panel.set_scene(self.schematic_tab.scene)
+        nets_dock = QDockWidget("Nets", self)
+        nets_dock.setWidget(self.net_panel)
+        nets_dock.setObjectName("NetsDock")
+        nets_dock.setAllowedAreas(Qt.RightDockWidgetArea | Qt.LeftDockWidgetArea)
+        self.addDockWidget(Qt.RightDockWidgetArea, nets_dock)
+        self.nets_dock = nets_dock
+
         self.schematic_tab.scene.request_properties = self._show_properties_for
         self.schematic_tab.scene.selectionChanged.connect(self._on_selection_changed)
 
@@ -75,6 +85,7 @@ class MainWindow(QMainWindow):
 
         view_menu = self.menuBar().addMenu("View")
         view_menu.addAction(self.props_dock.toggleViewAction())
+        view_menu.addAction(self.nets_dock.toggleViewAction())
 
         edit_menu = self.menuBar().addMenu("Edit")
         undo_act = self.undo_stack.createUndoAction(self, "Undo")
