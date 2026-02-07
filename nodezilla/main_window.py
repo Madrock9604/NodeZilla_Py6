@@ -3,20 +3,24 @@
 # ========================================
 from __future__ import annotations
 from typing import List
+from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence, QUndoStack
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QToolBar, QLabel, QSpinBox,
-    QDockWidget, QStatusBar, QFileDialog, QMessageBox
+    QDockWidget, QStatusBar, QFileDialog, QMessageBox, QDialog, QInputDialog
 )
 import json
 from .schematic_scene import SchematicScene
 from .schematic_view import SchematicView
 from .properties_panel import PropertiesPanel
 from .net_panel import NetPanel
-from .graphics_items import ComponentItem
+from .graphics_items import ComponentItem, WireItem
 from .commands import DeleteItemsCommand, RotateComponentCommand
 from .theme import ThemeWatcher
+from .component_library import load_component_library
+from .component_panel import ComponentPanel
+from .custom_component_dialog import CustomComponentDialog
 
 
 class InstrumentsPlaceholder(QWidget):
@@ -52,6 +56,7 @@ class MainWindow(QMainWindow):
         self._watcher = ThemeWatcher(QApplication.instance(), self._apply_theme)
 
         self.schematic_tab = SchematicTab(self.status_label, self.undo_stack)
+        self.component_library = load_component_library()
         theme = self._watcher.current_theme()
         self._apply_theme(theme)
         self.instruments_tab = InstrumentsPlaceholder()
@@ -77,6 +82,15 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.RightDockWidgetArea, nets_dock)
         self.nets_dock = nets_dock
 
+        self.component_panel = ComponentPanel(self.component_library)
+        self.component_panel.place_requested.connect(self.schematic_tab.scene.set_mode_place)
+        component_dock = QDockWidget("Components", self)
+        component_dock.setWidget(self.component_panel)
+        component_dock.setObjectName("ComponentsDock")
+        component_dock.setAllowedAreas(Qt.RightDockWidgetArea | Qt.LeftDockWidgetArea)
+        self.addDockWidget(Qt.LeftDockWidgetArea, component_dock)
+        self.component_dock = component_dock
+
         self.schematic_tab.scene.request_properties = self._show_properties_for
         self.schematic_tab.scene.selectionChanged.connect(self._on_selection_changed)
 
@@ -86,6 +100,7 @@ class MainWindow(QMainWindow):
         view_menu = self.menuBar().addMenu("View")
         view_menu.addAction(self.props_dock.toggleViewAction())
         view_menu.addAction(self.nets_dock.toggleViewAction())
+        view_menu.addAction(self.component_dock.toggleViewAction())
 
         edit_menu = self.menuBar().addMenu("Edit")
         undo_act = self.undo_stack.createUndoAction(self, "Undo")
@@ -98,6 +113,7 @@ class MainWindow(QMainWindow):
         sb = QStatusBar()
         sb.addWidget(self.status_label)
         self.setStatusBar(sb)
+        self._install_component_shortcuts()
 
 
     def _apply_theme(self, theme):
@@ -110,10 +126,21 @@ class MainWindow(QMainWindow):
 
     # selection → props
     def _on_selection_changed(self):
+        selected = self.schematic_tab.scene.selectedItems()
+        wires = [it for it in selected if isinstance(it, WireItem)]
+        if wires:
+            self.props_panel.show_wire(wires[0])
+            return
         comps = [it for it in self.schematic_tab.scene.selectedItems() if isinstance(it, ComponentItem)]
         self.props_panel.show_component(comps[0] if comps else None)
 
-    def _apply_properties(self, refdes: str, value: str):
+    def _apply_properties(self, kind: str | None, refdes: str, value: str, wire_color: str):
+        if kind == "wire":
+            wires = [it for it in self.schematic_tab.scene.selectedItems() if isinstance(it, WireItem)]
+            for w in wires:
+                if hasattr(w, "set_wire_color"):
+                    w.set_wire_color(wire_color or None)
+            return
         comps = [it for it in self.schematic_tab.scene.selectedItems() if isinstance(it, ComponentItem)]
         if not comps:
             return
@@ -122,6 +149,19 @@ class MainWindow(QMainWindow):
             c.set_value(value)
 
     # toolbar/menu builders
+    def _install_component_shortcuts(self):
+        for act in getattr(self, "_component_shortcut_actions", []):
+            self.removeAction(act)
+        self._component_shortcut_actions = []
+        for comp in self.component_library.sorted_components():
+            if not comp.shortcut:
+                continue
+            act = QAction(f"Place {comp.display_name}", self)
+            act.setShortcut(comp.shortcut)
+            act.triggered.connect(lambda _=False, k=comp.kind: self.schematic_tab.scene.set_mode_place(k))
+            self.addAction(act)
+            self._component_shortcut_actions.append(act)
+
     def _build_toolbar(self):
         tb = QToolBar("Tools")
         tb.setMovable(False)
@@ -132,20 +172,14 @@ class MainWindow(QMainWindow):
         act_select.triggered.connect(self.schematic_tab.scene.set_mode_select)
         tb.addAction(act_select)
 
-        tb.addSeparator()
-        for kind, key in [
-            ("Resistor", "R"),
-            ("Capacitor", "C"),
-            ("VSource", "V"),
-            ("Inductor", "L"),
-            ("Diode", "Shift+D"),
-            ("ISource", "I"),
-            ("Ground", "Shift+G"),
-        ]:
-            act = QAction(kind, self)
-            act.setShortcut(key)
-            act.triggered.connect(lambda _=False, k=kind: self.schematic_tab.scene.set_mode_place(k))
-            tb.addAction(act)
+        act_components = QAction("Components", self)
+        def _open_components():
+            self.component_dock.show()
+            self.component_dock.raise_()
+            if hasattr(self.component_panel, "search"):
+                self.component_panel.search.setFocus()
+        act_components.triggered.connect(_open_components)
+        tb.addAction(act_components)
 
         tb.addSeparator()
         act_wire = QAction("Wire", self)
@@ -247,6 +281,14 @@ class MainWindow(QMainWindow):
         act_export_netlist.triggered.connect(self._export_netlist)
         fm.addAction(act_export_netlist)
 
+        act_custom_component = QAction("Create Custom Component…", self)
+        act_custom_component.triggered.connect(self._create_custom_component)
+        fm.addAction(act_custom_component)
+
+        act_edit_custom = QAction("Edit Custom Component…", self)
+        act_edit_custom.triggered.connect(self._edit_custom_component)
+        fm.addAction(act_edit_custom)
+
         fm.addSeparator()
         act_quit = QAction("Quit", self)
         act_quit.setShortcut(QKeySequence.Quit)
@@ -293,6 +335,38 @@ class MainWindow(QMainWindow):
         sel = list(sc.selectedItems())
         if sel:
             sc.undo_stack.push(DeleteItemsCommand(sc, sel))
+
+    def _create_custom_component(self):
+        dlg = CustomComponentDialog(self)
+        if dlg.exec() == QDialog.Accepted:
+            self.component_library = load_component_library(force_reload=True)
+            self.component_panel.reload_library()
+            self._install_component_shortcuts()
+            self.statusBar().showMessage("Custom component saved.", 3000)
+
+    def _edit_custom_component(self):
+        lib_path = Path(__file__).resolve().parent.parent / "assets" / "components" / "library.json"
+        try:
+            data = json.loads(lib_path.read_text())
+        except Exception:
+            data = {"components": []}
+        customs = [c for c in data.get("components", []) if str(c.get("symbol", "")).endswith(".json")]
+        if not customs:
+            QMessageBox.information(self, "Edit Custom Component", "No custom components found.")
+            return
+        kinds = [c.get("kind", "") for c in customs if c.get("kind")]
+        kind, ok = QInputDialog.getItem(self, "Edit Custom Component", "Component:", kinds, 0, False)
+        if not ok or not kind:
+            return
+        dlg = CustomComponentDialog(self)
+        if not dlg.load_from_library(kind):
+            QMessageBox.warning(self, "Edit Custom Component", "Failed to load component.")
+            return
+        if dlg.exec() == QDialog.Accepted:
+            self.component_library = load_component_library(force_reload=True)
+            self.component_panel.reload_library()
+            self._install_component_shortcuts()
+            self.statusBar().showMessage("Custom component updated.", 3000)
 
     def _rotate_selected(self, angle: int):
         sc = self.schematic_tab.scene

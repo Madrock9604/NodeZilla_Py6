@@ -195,6 +195,16 @@ class NetlistBuilder:
 
     def build(self, scene) -> Netlist:
         components: List[ComponentItem] = [it for it in scene.items() if isinstance(it, ComponentItem)]
+        if hasattr(scene, "net_data"):
+            nets_meta = scene.net_data()
+            nets = [
+                Net(name=n.get("name", self._net_namer(n.get("connections", []), i + 1)), connections=list(n.get("connections", [])))
+                for i, n in enumerate(nets_meta)
+                if n.get("connections")
+            ]
+            component_models = [Component(refdes=c.refdes, kind=c.kind, value=c.value) for c in components]
+            return Netlist(components=component_models, nets=nets)
+
         wires: List[WireItem] = [it for it in scene.items() if isinstance(it, WireItem)]
 
         uf = _UnionFind()

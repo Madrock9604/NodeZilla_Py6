@@ -1,0 +1,153 @@
+{
+  "components": [
+    {
+      "kind": "Resistor",
+      "display_name": "Resistor",
+      "category": "Passive",
+      "prefix": "R",
+      "shortcut": "R",
+      "symbol": "defaults/resistor.json",
+      "auto_align_terminals": true,
+      "auto_scale_symbol": true,
+      "ports": [
+        {
+          "name": "A",
+          "x": -50,
+          "y": 0
+        },
+        {
+          "name": "B",
+          "x": 50,
+          "y": 0
+        }
+      ]
+    },
+    {
+      "kind": "Capacitor",
+      "display_name": "Capacitor",
+      "category": "Passive",
+      "prefix": "C",
+      "shortcut": "C",
+      "symbol": "defaults/capacitor.json",
+      "auto_align_terminals": true,
+      "auto_scale_symbol": true,
+      "ports": [
+        {
+          "name": "A",
+          "x": -50,
+          "y": 0
+        },
+        {
+          "name": "B",
+          "x": 50,
+          "y": 0
+        }
+      ]
+    },
+    {
+      "kind": "Inductor",
+      "display_name": "Inductor",
+      "category": "Passive",
+      "prefix": "L",
+      "shortcut": "L",
+      "symbol": "defaults/inductor.json",
+      "auto_align_terminals": true,
+      "auto_scale_symbol": true,
+      "ports": [
+        {
+          "name": "A",
+          "x": -50,
+          "y": 0
+        },
+        {
+          "name": "B",
+          "x": 50,
+          "y": 0
+        }
+      ]
+    },
+    {
+      "kind": "Diode",
+      "display_name": "Diode",
+      "category": "Semiconductor",
+      "prefix": "D",
+      "shortcut": "Shift+D",
+      "symbol": "defaults/diode.json",
+      "auto_align_terminals": true,
+      "auto_scale_symbol": true,
+      "ports": [
+        {
+          "name": "A",
+          "x": -50,
+          "y": 0
+        },
+        {
+          "name": "B",
+          "x": 50,
+          "y": 0
+        }
+      ]
+    },
+    {
+      "kind": "VSource",
+      "display_name": "Voltage Source",
+      "category": "Source",
+      "prefix": "V",
+      "shortcut": "V",
+      "symbol": "defaults/voltage_source.json",
+      "auto_align_terminals": true,
+      "auto_scale_symbol": true,
+      "ports": [
+        {
+          "name": "A",
+          "x": -50,
+          "y": 0
+        },
+        {
+          "name": "B",
+          "x": 50,
+          "y": 0
+        }
+      ]
+    },
+    {
+      "kind": "ISource",
+      "display_name": "Current Source",
+      "category": "Source",
+      "prefix": "I",
+      "shortcut": "I",
+      "symbol": "defaults/current_source.json",
+      "auto_align_terminals": true,
+      "auto_scale_symbol": true,
+      "ports": [
+        {
+          "name": "A",
+          "x": -50,
+          "y": 0
+        },
+        {
+          "name": "B",
+          "x": 50,
+          "y": 0
+        }
+      ]
+    },
+    {
+      "kind": "Ground",
+      "display_name": "Ground",
+      "category": "Reference",
+      "prefix": "GND",
+      "shortcut": "Shift+G",
+      "symbol": "defaults/ground.json",
+      "auto_align_terminals": true,
+      "auto_scale_symbol": true,
+      "ports": [
+        {
+          "name": "A",
+          "x": 0,
+          "y": -20
+        }
+      ]
+    }
+  ]
+}

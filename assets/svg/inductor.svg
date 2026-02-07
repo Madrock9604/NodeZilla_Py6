@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg width="160" height="80" viewBox="-50 -25 120 50" xmlns="http://www.w3.org/2000/svg">
-  <g fill="none" stroke="#1f2933" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-    <line x1="-50" y1="0" x2="-30" y2="0" />
-    <path d="M -30 0 Q -20 -12 -10 0 Q 0 -12 10 0 Q 20 -12 30 0 Q 40 -12 50 0" />
-    <line x1="50" y1="0" x2="70" y2="0" />
-  </g>
-</svg>

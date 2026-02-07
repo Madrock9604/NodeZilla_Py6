@@ -34,6 +34,9 @@ class AddComponentCommand(QUndoCommand):
 
     def redo(self):
         self.scene.addItem(self.comp)
+        theme = getattr(self.scene, "theme", None)
+        if theme and hasattr(self.comp, "apply_theme"):
+            self.comp.apply_theme(theme)
 
 
     def undo(self):
