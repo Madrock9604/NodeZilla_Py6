@@ -5,11 +5,16 @@ from PySide6.QtCore import QObject, QEvent, Qt
 from PySide6.QtWidgets import QApplication
 
 def _is_dark_from_palette(pal: QPalette) -> bool:
+    """Fallback dark-mode detection from palette luminance."""
     col = pal.color(QPalette.ColorRole.Window)
     luma = 0.2126 * col.redF() + 0.7152 * col.greenF() + 0.0722 * col.blueF()
     return luma < 0.5
 
 def detect_dark_mode(app: QApplication) -> bool:
+    """Detect dark mode across Qt versions and platforms.
+
+    Qt >= 6.5 exposes `styleHints().colorScheme()`. Older setups use palette.
+    """
     # Qt ≥ 6.5 has colorScheme(); we fall back to palette if unavailable.
     scheme = getattr(app.styleHints(), "colorScheme", None)
     if callable(scheme):
@@ -20,11 +25,13 @@ def detect_dark_mode(app: QApplication) -> bool:
     return _is_dark_from_palette(app.palette())
 
 def _auto_text_color(bg: QColor) -> QColor:
+    """Choose readable text color from background luminance."""
     r, g, b = bg.red(), bg.green(), bg.blue()
     luma = (299*r + 587*g + 114*b) / 1000.0
     return QColor(20, 20, 20) if luma > 128 else QColor(235, 235, 235)
 
 class Theme:
+    """Immutable-ish holder for scene and symbol colors."""
     def __init__(
         self,
         name: str,
@@ -73,9 +80,11 @@ class ThemeWatcher(QObject):
         self._callback(self.current_theme())
 
     def current_theme(self) -> Theme:
+        """Return the active Theme based on current OS/application scheme."""
         return DARK if detect_dark_mode(self._app) else LIGHT
 
     def eventFilter(self, obj, event):
+        """React to palette/style changes and re-apply theme."""
         if event.type() in (
             QEvent.Type.ApplicationPaletteChange,
             QEvent.Type.PaletteChange,

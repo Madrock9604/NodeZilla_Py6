@@ -7,6 +7,10 @@ import sys
 
 
 def main():
+    """Application entry point used by run.py.
+
+    Creates one QApplication, mounts the main window, and starts Qt's event loop.
+    """
     app = QApplication(sys.argv)
     w = MainWindow()
     w.show()

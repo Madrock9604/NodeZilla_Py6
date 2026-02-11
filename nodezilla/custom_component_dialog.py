@@ -367,20 +367,24 @@ class CustomComponentDialog(QDialog):
         self.view.viewport().update()
 
     def _sync_pin_defaults(self):
+        """Update auto-generated pin naming pattern from UI controls."""
         self._pin_prefix = self.pin_prefix_edit.text().strip() or "P"
         self._pin_index = int(self.pin_index_spin.value())
 
     def _sync_pin_snap(self):
+        """Update pin-to-edge snap behavior."""
         self._pin_edge_snap = self.pin_edge_chk.isChecked()
         self._pin_edge_tol = float(self.pin_edge_tol_spin.value())
 
     def _next_pin_name(self) -> str:
+        """Allocate next pin name using Prefix + incrementing index."""
         name = f"{self._pin_prefix}{self._pin_index}"
         self._pin_index += 1
         self.pin_index_spin.setValue(self._pin_index)
         return name
 
     def _snap_to_guide_edge(self, pos: QPointF) -> QPointF:
+        """Snap pin placement near the guide rectangle edge for cleaner symbols."""
         if not self._pin_edge_snap:
             return pos
         r = self._guide_rect.rect()
@@ -404,6 +408,10 @@ class CustomComponentDialog(QDialog):
         return QPointF(x, y)
 
     def _constrain_point(self, start: QPointF, pos: QPointF, tool: str) -> QPointF:
+        """Constrain drawing with Shift:
+        - line/poly -> horizontal/vertical/45 deg
+        - rect/ellipse -> square/circle
+        """
         dx = pos.x() - start.x()
         dy = pos.y() - start.y()
         if tool in ("rect", "ellipse"):
@@ -437,6 +445,7 @@ class CustomComponentDialog(QDialog):
             self.category_edit.setText("Custom")
 
     def _refresh_category_folder(self):
+        """Validate current category path still exists on disk."""
         root = Path(__file__).resolve().parent.parent / "assets" / "components" / "library"
         root.mkdir(parents=True, exist_ok=True)
         current = self.category_edit.text().strip()
@@ -514,6 +523,7 @@ class CustomComponentDialog(QDialog):
         self._refresh_pin_table()
 
     def _mirror_selected(self, horizontal: bool = True):
+        """Mirror selected scene items around their own local centers."""
         for item in self.scene.selectedItems():
             if item is self._guide_rect:
                 continue
@@ -588,6 +598,7 @@ class CustomComponentDialog(QDialog):
         return None
 
     def _serialize_item(self, item) -> Optional[dict]:
+        """Convert one selected graphics item into clipboard-safe payload."""
         if item is self._guide_rect:
             return None
         if item.data(0) == "pin":
@@ -611,6 +622,7 @@ class CustomComponentDialog(QDialog):
         return None
 
     def _deserialize_item(self, payload: dict, offset: QPointF = QPointF(0, 0)):
+        """Instantiate one item payload back into the scene."""
         snap = self.view.snap_point
         t = payload.get("type")
         if t == "pin":
@@ -826,6 +838,7 @@ class CustomComponentDialog(QDialog):
         return True
 
     def keyPressEvent(self, e):
+        """Keyboard workflow for editing: copy/paste/rotate/nudge/delete."""
         if e.key() == Qt.Key_Escape:
             # Use Esc to return to select mode instead of closing dialog.
             self._set_tool("select")

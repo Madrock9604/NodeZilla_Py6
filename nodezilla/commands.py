@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
 
 class AddComponentCommand(QUndoCommand):
+    """Undo/redo wrapper for adding a component item to the scene."""
     def __init__(self, scene: 'SchematicScene', comp: ComponentItem):
         super().__init__(f"Add {comp.kind} {comp.refdes or ''}")
         self.scene = scene
@@ -49,6 +50,7 @@ class AddComponentCommand(QUndoCommand):
 
 
 class AddWireCommand(QUndoCommand):
+    """Undo/redo wrapper for adding a wire item and reattaching endpoints."""
     def __init__(self, scene: 'SchematicScene', wire: 'WireType'):
         super().__init__("Add wire")
         self.scene = scene
@@ -82,6 +84,7 @@ class AddWireCommand(QUndoCommand):
 
 
 class MoveComponentCommand(QUndoCommand):
+    """Undoable translation of one component item."""
     def __init__(self, comp: ComponentItem, old_pos: QPointF, new_pos: QPointF):
         super().__init__(f"Move {comp.refdes or comp.kind}")
         self.comp = comp
@@ -97,6 +100,7 @@ class MoveComponentCommand(QUndoCommand):
 
 
 class RotateComponentCommand(QUndoCommand):
+    """Undoable component rotation + dependent wire path refresh."""
     def __init__(self, comp: ComponentItem, old_angle: float, new_angle: float):
         super().__init__(f"Rotate {comp.refdes or comp.kind}")
         self.comp = comp
@@ -119,11 +123,13 @@ class RotateComponentCommand(QUndoCommand):
 
 
 class DeleteItemsCommand(QUndoCommand):
+    """Delete selected components/wires with proper dependency ordering."""
     def __init__(self, scene, selected_items):
         super().__init__("Delete")
         self.scene = scene
 
-        # Normalize selection and expand to include wires attached to components
+        # Normalize selection and expand to include wires attached to components.
+        # This avoids leaving dangling wires when only components are selected.
         comps = []
         wires = []
 
@@ -175,6 +181,7 @@ class DeleteItemsCommand(QUndoCommand):
             self.scene._rebuild_junction_markers()
 
 class SetWirePointsCommand(QUndoCommand):
+    """Undoable edit for wire waypoint lists (segment dragging/reroutes)."""
     def __init__(self, wire, new_pts):
         super().__init__("Edit Wire")
         self.wire = wire

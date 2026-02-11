@@ -24,6 +24,7 @@ from .custom_component_dialog import CustomComponentDialog
 
 
 class InstrumentsPlaceholder(QWidget):
+    """Stub tab kept visible while instrument module is under development."""
     def __init__(self):
         super().__init__()
         v = QVBoxLayout(self)
@@ -33,6 +34,7 @@ class InstrumentsPlaceholder(QWidget):
 
 
 class SchematicTab(QWidget):
+    """Container for one schematic scene+view pair."""
     def __init__(self, status_label: QLabel, undo_stack: QUndoStack):
         super().__init__()
         self.scene = SchematicScene(status_label, undo_stack)
@@ -44,6 +46,7 @@ class SchematicTab(QWidget):
 
 
 class MainWindow(QMainWindow):
+    """Application shell wiring scene, docks, menus, and file operations."""
     def __init__(self):
         super().__init__()
         self.setWindowTitle("NodeZilla – Schematic & Instruments (Modular)")
@@ -117,6 +120,7 @@ class MainWindow(QMainWindow):
 
 
     def _apply_theme(self, theme):
+        """Apply theme to scene items (deferred safely until UI exists)."""
         # If UI not ready yet, try again on the next event loop tick
         if not hasattr(self, "schematic_tab") or self.schematic_tab is None:
             from PySide6.QtCore import QTimer
@@ -126,6 +130,7 @@ class MainWindow(QMainWindow):
 
     # selection → props
     def _on_selection_changed(self):
+        """Push active selection into the properties panel."""
         selected = self.schematic_tab.scene.selectedItems()
         wires = [it for it in selected if isinstance(it, WireItem)]
         if wires:
@@ -135,6 +140,7 @@ class MainWindow(QMainWindow):
         self.props_panel.show_component(comps[0] if comps else None)
 
     def _apply_properties(self, kind: str | None, refdes: str | None, value: str | None, wire_color: str):
+        """Apply edits from PropertiesPanel back to selected scene items."""
         if kind == "wire":
             wires = [it for it in self.schematic_tab.scene.selectedItems() if isinstance(it, WireItem)]
             for w in wires:
@@ -152,6 +158,7 @@ class MainWindow(QMainWindow):
 
     # toolbar/menu builders
     def _install_component_shortcuts(self):
+        """Build dynamic placement shortcuts from component library metadata."""
         for act in getattr(self, "_component_shortcut_actions", []):
             self.removeAction(act)
         self._component_shortcut_actions = []
@@ -165,6 +172,7 @@ class MainWindow(QMainWindow):
             self._component_shortcut_actions.append(act)
 
     def _build_toolbar(self):
+        """Create top-level CAD actions for editing/navigation/export."""
         tb = QToolBar("Tools")
         tb.setMovable(False)
         self.addToolBar(Qt.TopToolBarArea, tb)
@@ -264,6 +272,7 @@ class MainWindow(QMainWindow):
         tb.addAction(act_export_netlist)
 
     def _build_menu(self):
+        """Create file menu actions (new/open/save/export/custom parts)."""
         fm = self.menuBar().addMenu("File")
 
         act_new = QAction("New", self)
@@ -327,6 +336,7 @@ class MainWindow(QMainWindow):
         self._grid_spin.setValue(max(1, int(self._grid_spin.value() + d)))
 
     def _show_properties_for(self, comp: ComponentItem):
+        """Focus properties dock and select the target component."""
         if self.props_dock.isHidden():
             self.props_dock.show()
         self.props_dock.raise_()
@@ -336,12 +346,14 @@ class MainWindow(QMainWindow):
         self.props_panel.refdes_edit.setFocus()
 
     def _delete_selected(self):
+        """Delete selected scene items using undo stack command."""
         sc = self.schematic_tab.scene
         sel = list(sc.selectedItems())
         if sel:
             sc.undo_stack.push(DeleteItemsCommand(sc, sel))
 
     def _create_custom_component(self):
+        """Open component creator dialog and reload library on success."""
         dlg = CustomComponentDialog(self)
         if dlg.exec() == QDialog.Accepted:
             self.component_library = load_component_library(force_reload=True)
@@ -350,6 +362,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Custom component saved.", 3000)
 
     def _edit_custom_component(self):
+        """Open existing custom component in editor dialog."""
         lib = load_component_library(force_reload=True)
         customs = [c for c in lib.sorted_components() if str(c.symbol).startswith("custom/")]
         if not customs:
@@ -370,6 +383,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Custom component updated.", 3000)
 
     def _rotate_selected(self, angle: int):
+        """Rotate selected components and record undo command."""
         sc = self.schematic_tab.scene
         comps = [it for it in sc.selectedItems() if isinstance(it, ComponentItem)]
         if not comps:
@@ -386,6 +400,7 @@ class MainWindow(QMainWindow):
 
     # file ops
     def _new_schematic(self):
+        """Clear scene after user confirmation."""
         if QMessageBox.question(
             self, "New schematic", "Clear current schematic?",
             QMessageBox.Yes | QMessageBox.No
@@ -418,6 +433,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to save netlist: {e}")
 
     def _open(self):
+        """Load schematic JSON from disk into scene."""
         path, _ = QFileDialog.getOpenFileName(self, "Open schematic", filter="Schematic (*.json)")
         if path:
             try:
@@ -430,6 +446,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "Error", f"Failed to load: {e}")
 
     def _save(self):
+        """Serialize scene JSON and save to disk."""
         path, _ = QFileDialog.getSaveFileName(self, "Save schematic", filter="Schematic (*.json)")
         if path:
             try:

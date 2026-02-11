@@ -18,6 +18,7 @@ from .graphics_items import WireItem
 
 
 class NetPanel(QWidget):
+    """Table view of computed nets with optional in-place renaming."""
     def __init__(self):
         super().__init__()
         self._scene = None
@@ -43,6 +44,7 @@ class NetPanel(QWidget):
         self.table.itemChanged.connect(self._on_item_changed)
 
     def set_scene(self, scene):
+        """Attach to a scene and subscribe to net/selection change signals."""
         self._scene = scene
         if scene is not None:
             scene.nets_changed.connect(self._schedule_refresh)
@@ -50,12 +52,14 @@ class NetPanel(QWidget):
         self._schedule_refresh()
 
     def _schedule_refresh(self):
+        """Coalesce repeated refresh triggers into one queued update."""
         if self._pending_refresh:
             return
         self._pending_refresh = True
         QTimer.singleShot(0, self._refresh)
 
     def _refresh(self):
+        """Rebuild the table from latest scene.net_data()."""
         self._pending_refresh = False
         if self._scene is None:
             return
@@ -105,6 +109,7 @@ class NetPanel(QWidget):
                 return
 
     def _on_selection_changed(self):
+        """Selecting a row highlights all wires belonging to that net."""
         if self._scene is None or self._updating:
             return
         net_id = self._selected_net_id()
@@ -118,6 +123,7 @@ class NetPanel(QWidget):
         self._ignore_scene_clear = False
 
     def _sync_selection_from_scene(self):
+        """Mirror scene wire selection back to the net table selection."""
         if self._scene is None or self._updating:
             return
         if self._ignore_scene_clear:
@@ -151,6 +157,7 @@ class NetPanel(QWidget):
         self._updating = False
 
     def _on_item_changed(self, item: QTableWidgetItem):
+        """Apply user net rename edits back to the scene model."""
         if self._scene is None or self._updating:
             return
         if item.column() != 0:
