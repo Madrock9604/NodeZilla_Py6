@@ -1,0 +1,41 @@
+{
+  "kind": "U",
+  "display_name": "LM747",
+  "category": "OpAmp",
+  "prefix": "LM747_",
+  "spice_type": "X",
+  "value_label": "Part Number",
+  "shortcut": "O",
+  "type": "component",
+  "net_name": "",
+  "symbol": "custom/U.json",
+  "auto_align_terminals": false,
+  "auto_scale_symbol": false,
+  "ports": [
+    {
+      "name": "+",
+      "x": -70.0,
+      "y": -20.0
+    },
+    {
+      "name": "-",
+      "x": -70.0,
+      "y": 20.0
+    },
+    {
+      "name": "Out",
+      "x": 70.0,
+      "y": 0.0
+    },
+    {
+      "name": "V+",
+      "x": 10.0,
+      "y": -40.0
+    },
+    {
+      "name": "V-",
+      "x": 10.0,
+      "y": 40.0
+    }
+  ]
+}

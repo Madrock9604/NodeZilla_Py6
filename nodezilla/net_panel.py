@@ -72,7 +72,11 @@ class NetPanel(QWidget):
             name_item = QTableWidgetItem(net["name"])
             name_item.setData(Qt.UserRole, net["id"])
             name_item.setData(Qt.UserRole + 1, net["default_name"])
-            name_item.setFlags(name_item.flags() | Qt.ItemIsEditable)
+            if net.get("label_name"):
+                name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
+                name_item.setToolTip("Named by a net label component. Edit the label/value to change.")
+            else:
+                name_item.setFlags(name_item.flags() | Qt.ItemIsEditable)
 
             connections = net["connections"]
             wires = net["wires"]

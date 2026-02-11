@@ -6,15 +6,21 @@ from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import QGraphicsView
 
 class SchematicView(QGraphicsView):
+    """QGraphicsView with zoom + right-drag panning."""
     def __init__(self, scene):
         super().__init__(scene)
         self.setRenderHint(QPainter.Antialiasing)
         self.setDragMode(QGraphicsView.RubberBandDrag)
         self.setViewportUpdateMode(QGraphicsView.SmartViewportUpdate)
+        self.setMouseTracking(True)
+        if self.viewport():
+            self.viewport().setMouseTracking(True)
         self._panning = False
         self._pan_start = QPointF()
+        self._pan_drag_mode = QGraphicsView.RubberBandDrag
 
     def wheelEvent(self, e):
+        """Zoom around the mouse cursor."""
         z_in = 1.15; z_out = 1/1.15
         old = self.mapToScene(e.position().toPoint())
         f = z_in if e.angleDelta().y() > 0 else z_out
@@ -23,8 +29,18 @@ class SchematicView(QGraphicsView):
         d = new - old; self.translate(d.x(), d.y())
 
     def mousePressEvent(self, e):
-        if e.button() == Qt.MiddleButton:
-            self._panning = True; self._pan_start = e.position(); self.setCursor(Qt.ClosedHandCursor)
+        """Right-drag to pan; left-click empty area clears selection."""
+        if e.button() == Qt.RightButton:
+            sc = self.scene()
+            if sc is not None and getattr(sc, "mode", None) == getattr(sc, "Mode", object()).WIRE and getattr(sc, "_routing", False):
+                # Let right-click cancel wire routing in the scene.
+                super().mousePressEvent(e)
+                return
+            self._panning = True
+            self._pan_start = e.position()
+            self._pan_drag_mode = self.dragMode()
+            self.setDragMode(QGraphicsView.NoDrag)
+            self.setCursor(Qt.ClosedHandCursor)
             e.accept(); return
         if e.button() == Qt.LeftButton:
             if self.itemAt(e.position().toPoint()) is None:
@@ -34,14 +50,23 @@ class SchematicView(QGraphicsView):
         super().mousePressEvent(e)
 
     def mouseMoveEvent(self, e):
+        """Pan by scrolling the view (stable with drag modes)."""
         if self._panning:
-            d = e.position() - self._pan_start; self._pan_start = e.position(); self.translate(d.x(), d.y())
+            d = e.position() - self._pan_start
+            self._pan_start = e.position()
+            h = self.horizontalScrollBar()
+            v = self.verticalScrollBar()
+            h.setValue(h.value() - int(d.x()))
+            v.setValue(v.value() - int(d.y()))
             e.accept(); return
         super().mouseMoveEvent(e)
 
     def mouseReleaseEvent(self, e):
-        if e.button() == Qt.MiddleButton and self._panning:
-            self._panning = False; self.setCursor(Qt.ArrowCursor); e.accept(); return
+        if e.button() == Qt.RightButton and self._panning:
+            self._panning = False
+            self.setCursor(Qt.ArrowCursor)
+            self.setDragMode(self._pan_drag_mode)
+            e.accept(); return
         super().mouseReleaseEvent(e)
 
     def fit_all(self):

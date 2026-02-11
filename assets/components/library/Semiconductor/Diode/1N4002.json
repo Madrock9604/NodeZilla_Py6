@@ -1,0 +1,26 @@
+{
+  "kind": "Diode",
+  "display_name": "1N4002",
+  "category": "Semiconductor",
+  "prefix": "D",
+  "spice_type": "D",
+  "default_value": "1N4002",
+  "shortcut": "Shift+D",
+  "symbol": "defaults/diode.json",
+  "show_value": true,
+  "value_label": "Part Number",
+  "auto_align_terminals": true,
+  "auto_scale_symbol": true,
+  "ports": [
+    {
+      "name": "A",
+      "x": -50,
+      "y": 0
+    },
+    {
+      "name": "B",
+      "x": 50,
+      "y": 0
+    }
+  ]
+}

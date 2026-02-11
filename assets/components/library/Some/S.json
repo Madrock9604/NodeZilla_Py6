@@ -1,0 +1,44 @@
+{
+  "kind": "S",
+  "display_name": "Comp",
+  "category": "Some",
+  "prefix": "Comp",
+  "shortcut": "",
+  "type": "component",
+  "net_name": "",
+  "symbol": "custom/S.json",
+  "auto_align_terminals": false,
+  "auto_scale_symbol": false,
+  "ports": [
+    {
+      "name": "P1",
+      "x": 40.0,
+      "y": -30.0
+    },
+    {
+      "name": "P2",
+      "x": 40.0,
+      "y": 0.0
+    },
+    {
+      "name": "P3",
+      "x": 40.0,
+      "y": 40.0
+    },
+    {
+      "name": "P4",
+      "x": -40.0,
+      "y": 40.0
+    },
+    {
+      "name": "P5",
+      "x": -40.0,
+      "y": 0.0
+    },
+    {
+      "name": "P6",
+      "x": -40.0,
+      "y": -30.0
+    }
+  ]
+}

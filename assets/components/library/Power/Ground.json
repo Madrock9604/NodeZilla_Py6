@@ -1,0 +1,19 @@
+{
+  "kind": "Ground",
+  "display_name": "Ground",
+  "category": "Power",
+  "prefix": "GND",
+  "shortcut": "Shift+G",
+  "type": "net",
+  "net_name": "GND",
+  "symbol": "defaults/ground.json",
+  "auto_align_terminals": true,
+  "auto_scale_symbol": true,
+  "ports": [
+    {
+      "name": "A",
+      "x": 0,
+      "y": -20
+    }
+  ]
+}

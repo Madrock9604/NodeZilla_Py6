@@ -134,7 +134,7 @@ class MainWindow(QMainWindow):
         comps = [it for it in self.schematic_tab.scene.selectedItems() if isinstance(it, ComponentItem)]
         self.props_panel.show_component(comps[0] if comps else None)
 
-    def _apply_properties(self, kind: str | None, refdes: str, value: str, wire_color: str):
+    def _apply_properties(self, kind: str | None, refdes: str | None, value: str | None, wire_color: str):
         if kind == "wire":
             wires = [it for it in self.schematic_tab.scene.selectedItems() if isinstance(it, WireItem)]
             for w in wires:
@@ -145,8 +145,10 @@ class MainWindow(QMainWindow):
         if not comps:
             return
         for c in comps:
-            c.set_refdes(refdes)
-            c.set_value(value)
+            if refdes is not None:
+                c.set_refdes(refdes)
+            if value is not None:
+                c.set_value(value)
 
     # toolbar/menu builders
     def _install_component_shortcuts(self):
@@ -186,6 +188,9 @@ class MainWindow(QMainWindow):
         act_wire.setShortcut("W")
         act_wire.triggered.connect(self.schematic_tab.scene.set_mode_wire)
         tb.addAction(act_wire)
+        act_net_label = QAction("Net Label", self)
+        act_net_label.triggered.connect(lambda: self.schematic_tab.scene.set_mode_place("NetLabel"))
+        tb.addAction(act_net_label)
 
         act_delete = QAction("Delete", self)
         act_delete.setShortcut(QKeySequence.Delete)
@@ -345,16 +350,12 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Custom component saved.", 3000)
 
     def _edit_custom_component(self):
-        lib_path = Path(__file__).resolve().parent.parent / "assets" / "components" / "library.json"
-        try:
-            data = json.loads(lib_path.read_text())
-        except Exception:
-            data = {"components": []}
-        customs = [c for c in data.get("components", []) if str(c.get("symbol", "")).endswith(".json")]
+        lib = load_component_library(force_reload=True)
+        customs = [c for c in lib.sorted_components() if str(c.symbol).startswith("custom/")]
         if not customs:
             QMessageBox.information(self, "Edit Custom Component", "No custom components found.")
             return
-        kinds = [c.get("kind", "") for c in customs if c.get("kind")]
+        kinds = [c.kind for c in customs if c.kind]
         kind, ok = QInputDialog.getItem(self, "Edit Custom Component", "Component:", kinds, 0, False)
         if not ok or not kind:
             return

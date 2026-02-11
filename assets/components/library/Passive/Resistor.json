@@ -1,0 +1,24 @@
+{
+  "kind": "Resistor",
+  "display_name": "Resistor",
+  "category": "Passive",
+  "prefix": "R",
+  "spice_type": "R",
+  "default_value": "1k",
+  "shortcut": "R",
+  "symbol": "defaults/resistor.json",
+  "auto_align_terminals": true,
+  "auto_scale_symbol": true,
+  "ports": [
+    {
+      "name": "A",
+      "x": -50,
+      "y": 0
+    },
+    {
+      "name": "B",
+      "x": 50,
+      "y": 0
+    }
+  ]
+}

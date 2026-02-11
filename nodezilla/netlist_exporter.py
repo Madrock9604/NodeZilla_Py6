@@ -8,7 +8,7 @@ preferred text serialization.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Tuple
 
 from .graphics_items import ComponentItem, WireItem
@@ -38,6 +38,16 @@ class Component:
     refdes: str
     kind: str
     value: str
+    pins: List["ComponentPin"] = field(default_factory=list)
+    spice_type: str = ""
+
+
+@dataclass
+class ComponentPin:
+    """A component pin and its net (or OPEN if unconnected)."""
+
+    name: str
+    net: str
 
 
 @dataclass
@@ -73,6 +83,75 @@ class SimpleNetlistFormatter:
         return "\n".join(lines)
 
 
+class DetailedNetlistFormatter:
+    """Readable netlist that includes per-pin net names and OPEN pins.
+
+    Customize formatting by overriding the lambdas below.
+    """
+
+    def __init__(
+        self,
+        *,
+        open_node: str = "OPEN",
+        component_header: Callable[[Component], str] | None = None,
+        pin_line: Callable[[Component, ComponentPin], str] | None = None,
+        net_header: Callable[[], str] | None = None,
+        net_line: Callable[[Net], str] | None = None,
+    ) -> None:
+        self._open = open_node
+        self._component_header = component_header or self._default_component_header
+        self._pin_line = pin_line or self._default_pin_line
+        self._net_header = net_header or (lambda: "[Nets]")
+        self._net_line = net_line or self._default_net_line
+
+    def __call__(self, netlist: Netlist) -> str:
+        lines: List[str] = ["[Components]"]
+        for comp in sorted(netlist.components, key=lambda c: c.refdes or c.kind):
+            lines.append(self._component_header(comp))
+            for pin in comp.pins:
+                lines.append(self._pin_line(comp, pin))
+
+        lines.append("")
+        lines.append(self._net_header())
+        for net in netlist.nets:
+            lines.append(self._net_line(net))
+        return "\n".join(lines)
+
+    @staticmethod
+    def _default_component_header(comp: Component) -> str:
+        value = f" value={comp.value}" if comp.value else ""
+        name = comp.refdes or comp.kind
+        return f"{name}: {comp.kind}{value}"
+
+    @staticmethod
+    def _default_pin_line(_comp: Component, pin: ComponentPin) -> str:
+        return f"  {pin.name}: {pin.net}"
+
+    @staticmethod
+    def _default_net_line(net: Net) -> str:
+        rhs = ", ".join(
+            f"{c.component_refdes or c.component_kind}.{c.port_name}"
+            for c in sorted(net.connections, key=lambda c: (c.component_refdes, c.port_name))
+        )
+        return f"{net.name}: {rhs}"
+
+
+class MyNetlistFormatter:
+    """Editable personal format. Adjust the lines below to your needs."""
+
+    def __call__(self, netlist: Netlist) -> str:
+        lines: List[str] = []
+        lines.append("BEGIN NETLIST")
+        for comp in sorted(netlist.components, key=lambda c: c.refdes or c.kind):
+            name = comp.refdes or comp.kind
+            value = f" {comp.value}" if comp.value else ""
+            lines.append(f"{name} {comp.kind}{value}")
+            for pin in comp.pins:
+                lines.append(f"  {pin.name}: {pin.net}")
+        lines.append("END NETLIST")
+        return "\n".join(lines)
+
+
 class SpiceNetlistFormatter:
     """Format a :class:`Netlist` into a basic SPICE-compatible netlist.
 
@@ -102,20 +181,15 @@ class SpiceNetlistFormatter:
         self._part_resolver = part_resolver or self._default_component_part
 
     def __call__(self, netlist: Netlist) -> str:
-        port_to_node: Dict[Tuple[str, str], str] = {}
-        for net in netlist.nets:
-            node_name = self._normalize_node_name(net.name)
-            for connection in net.connections:
-                refdes = connection.component_refdes or connection.component_kind
-                port_to_node[(refdes, connection.port_name)] = node_name
-
+        """Render SPICE lines using per-pin net mapping."""
         lines: List[str] = [f"* {self._title}"]
         for comp in sorted(netlist.components, key=lambda c: c.refdes or c.kind):
             refdes = self._name_resolver(comp)
-            nodes = [
-                port_to_node.get((refdes, port), self._floating_node)
-                for port in self._port_order
-            ]
+            if getattr(comp, "pins", None):
+                nodes = [self._normalize_node_name(p.net) for p in comp.pins]
+            else:
+                # Fallback to fixed port order if pin data is missing.
+                nodes = [self._floating_node for _ in self._port_order]
             tokens = [self._type_resolver(comp), refdes, *nodes]
             value = self._value_resolver(comp).strip()
             if value:
@@ -135,6 +209,8 @@ class SpiceNetlistFormatter:
 
     @staticmethod
     def _default_component_type(component: Component) -> str:
+        if component.spice_type:
+            return component.spice_type
         kind = component.kind.strip()
         if not kind:
             return "X"
@@ -194,18 +270,49 @@ class NetlistBuilder:
         self._formatter = formatter or SpiceNetlistFormatter()
 
     def build(self, scene) -> Netlist:
+        """Build a Netlist from the scene (uses scene.net_data if available)."""
         components: List[ComponentItem] = [it for it in scene.items() if isinstance(it, ComponentItem)]
+        from .component_library import load_component_library
+        comp_defs = load_component_library()
+        def _is_net_component(kind: str) -> bool:
+            cdef = comp_defs.get(kind)
+            return bool(cdef and getattr(cdef, "comp_type", "component") == "net")
         if hasattr(scene, "net_data"):
+            # Preferred path: use scene.net_data() for robust wiring/junction logic.
             nets_meta = scene.net_data()
             nets = [
-                Net(name=n.get("name", self._net_namer(n.get("connections", []), i + 1)), connections=list(n.get("connections", [])))
+                Net(
+                    name=n.get("name", self._net_namer(n.get("connections", []), i + 1)),
+                    connections=[c for c in n.get("connections", []) if not _is_net_component(c.component_kind)],
+                )
                 for i, n in enumerate(nets_meta)
                 if n.get("connections")
             ]
-            component_models = [Component(refdes=c.refdes, kind=c.kind, value=c.value) for c in components]
+            port_to_node: Dict[Tuple[str, str], str] = {}
+            for net in nets:
+                for connection in net.connections:
+                    refdes = connection.component_refdes or connection.component_kind
+                    port_to_node[(refdes, connection.port_name)] = net.name
+
+            component_models: List[Component] = []
+            for c in components:
+                if _is_net_component(c.kind):
+                    continue
+                refdes = c.refdes or c.kind
+                pins: List[ComponentPin] = []
+                ports = [p for p in getattr(c, "ports", []) if p is not None] or [
+                    p for p in (getattr(c, "port_left", None), getattr(c, "port_right", None)) if p is not None
+                ]
+                for port in ports:
+                    net_name = port_to_node.get((refdes, port.name), "OPEN")
+                    pins.append(ComponentPin(name=port.name, net=net_name))
+                cdef = comp_defs.get(c.kind)
+                spice_type = cdef.spice_type if cdef else ""
+                component_models.append(Component(refdes=c.refdes, kind=c.kind, value=c.value, pins=pins, spice_type=spice_type))
             return Netlist(components=component_models, nets=nets)
 
         wires: List[WireItem] = [it for it in scene.items() if isinstance(it, WireItem)]
+        components = [c for c in components if not _is_net_component(c.kind)]
 
         uf = _UnionFind()
         point_key = lambda p: (round(p.x(), 4), round(p.y(), 4))
@@ -245,9 +352,25 @@ class NetlistBuilder:
             name = self._net_namer(connections, idx + 1)
             nets.append(Net(name=name, connections=connections))
 
-        component_models = [
-            Component(refdes=c.refdes, kind=c.kind, value=c.value) for c in components
-        ]
+        port_to_node: Dict[Tuple[str, str], str] = {}
+        for net in nets:
+            for connection in net.connections:
+                refdes = connection.component_refdes or connection.component_kind
+                port_to_node[(refdes, connection.port_name)] = net.name
+
+        component_models: List[Component] = []
+        for c in components:
+            refdes = c.refdes or c.kind
+            pins: List[ComponentPin] = []
+            ports = [p for p in getattr(c, "ports", []) if p is not None] or [
+                p for p in (getattr(c, "port_left", None), getattr(c, "port_right", None)) if p is not None
+            ]
+            for port in ports:
+                net_name = port_to_node.get((refdes, port.name), "OPEN")
+                pins.append(ComponentPin(name=port.name, net=net_name))
+            cdef = comp_defs.get(c.kind)
+            spice_type = cdef.spice_type if cdef else ""
+            component_models.append(Component(refdes=c.refdes, kind=c.kind, value=c.value, pins=pins, spice_type=spice_type))
 
         return Netlist(components=component_models, nets=nets)
 
@@ -260,16 +383,19 @@ class NetlistBuilder:
     @staticmethod
     def _default_net_namer(connections: List[NetConnection], sequence: int) -> str:
         if any(c.component_kind.lower().startswith(("gnd", "ground")) for c in connections):
-            return "GND"
-        return f"N{sequence}"
+            return "0"
+        return str(sequence)
 
 
 __all__ = [
     "Component",
+    "ComponentPin",
     "Net",
     "NetConnection",
     "Netlist",
     "NetlistBuilder",
+    "DetailedNetlistFormatter",
+    "MyNetlistFormatter",
     "SimpleNetlistFormatter",
     "SpiceNetlistFormatter",
 ]

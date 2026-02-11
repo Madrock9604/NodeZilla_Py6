@@ -1,0 +1,19 @@
+{
+  "kind": "NetLabel",
+  "display_name": "Net Label",
+  "category": "Reference",
+  "prefix": "N",
+  "shortcut": "N",
+  "type": "net",
+  "net_name": "",
+  "symbol": "defaults/net_label.json",
+  "auto_align_terminals": false,
+  "auto_scale_symbol": false,
+  "ports": [
+    {
+      "name": "A",
+      "x": 0,
+      "y": 0
+    }
+  ]
+}

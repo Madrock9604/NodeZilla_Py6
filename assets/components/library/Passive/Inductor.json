@@ -1,0 +1,24 @@
+{
+  "kind": "Inductor",
+  "display_name": "Inductor",
+  "category": "Passive",
+  "prefix": "L",
+  "spice_type": "L",
+  "default_value": "1mH",
+  "shortcut": "L",
+  "symbol": "defaults/inductor.json",
+  "auto_align_terminals": true,
+  "auto_scale_symbol": true,
+  "ports": [
+    {
+      "name": "A",
+      "x": -50,
+      "y": 0
+    },
+    {
+      "name": "B",
+      "x": 50,
+      "y": 0
+    }
+  ]
+}

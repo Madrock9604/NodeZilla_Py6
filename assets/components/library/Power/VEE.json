@@ -1,0 +1,19 @@
+{
+  "kind": "VEE",
+  "display_name": "VEE Power",
+  "category": "Power",
+  "prefix": "P",
+  "shortcut": "",
+  "type": "net",
+  "net_name": "VEE",
+  "symbol": "defaults/net_label.json",
+  "auto_align_terminals": false,
+  "auto_scale_symbol": false,
+  "ports": [
+    {
+      "name": "A",
+      "x": 0,
+      "y": 0
+    }
+  ]
+}

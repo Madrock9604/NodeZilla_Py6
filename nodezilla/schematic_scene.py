@@ -4,8 +4,9 @@
 from __future__ import annotations
 from typing import Optional, List, Dict, Tuple
 import json
+import zlib
 from PySide6.QtCore import Qt, QPointF, QRectF, Signal, QTimer
-from PySide6.QtGui import QPen, QPainterPath, QTransform, QPainter, QBrush
+from PySide6.QtGui import QPen, QPainterPath, QTransform, QPainter, QBrush, QColor
 from PySide6.QtWidgets import QGraphicsScene, QLabel, QGraphicsView, QGraphicsItem, QGraphicsEllipseItem
 from .graphics_items import ComponentItem, PortItem
 from .commands import SetWirePointsCommand
@@ -36,7 +37,7 @@ class SchematicScene(QGraphicsScene):
         self.status_label = status_label
         self.setSceneRect(-5000, -5000, 10000, 10000)
         self._pending_port: Optional[PortItem] = None
-        self.grid_on = True; self.snap_on = True; self.grid_size = 20; self.grid_style = 'lines'
+        self.grid_on = True; self.snap_on = True; self.grid_size = 20; self.grid_style = 'dots'
         self._ghost_kind: Optional[str] = None; self._ghost_item: Optional[ComponentItem] = None
         self._view = None
         self.request_properties = None
@@ -47,15 +48,20 @@ class SchematicScene(QGraphicsScene):
         self._grid_pen_lines = QPen(Qt.lightGray, 0)
         self._grid_pen_dots  = QPen(Qt.lightGray, 2)
         self._routing = False
+        # Wire routing state
         self._route_pts = []          # waypoints between endpoints (QPointF)
         self._route_start_port = None # PortItem or None if starting from free/junction point
         self._route_start_point: Optional[QPointF] = None
         self._temp_dash = None        # QGraphicsPathItem (you already use one)
+        # Explicit wire junctions (only when user connects wires)
         self._junction_markers: list[QGraphicsItem] = []
         self._wire_junctions: set[Tuple[float, float]] = set()
+        self._junction_owners: Dict[Tuple[float, float], set] = {}
         self._net_name_overrides: Dict[Tuple[float, float], str] = {}
+        self._net_label_overrides: Dict[Tuple[float, float], str] = {}
         self._net_update_pending = False
         self.changed.connect(self._schedule_nets_changed)
+        self.wire_route_mode = "orth"  # orth | free | 45
 
 
     def apply_theme(self, theme: "Theme"):
@@ -81,26 +87,72 @@ class SchematicScene(QGraphicsScene):
 
     def _emit_nets_changed(self):
         self._net_update_pending = False
+        self._update_net_labels()
         self.nets_changed.emit()
+
+    def _update_net_labels(self):
+        # Compute label-based net names from net-type components.
+        saved = dict(self._net_label_overrides)
+        self._net_label_overrides = {}
+        try:
+            nets = self.net_data()
+            comp_defs = load_component_library()
+            comp_items = [it for it in self.items() if isinstance(it, ComponentItem)]
+            comp_by_key: Dict[Tuple[str, str], ComponentItem] = {}
+            for comp in comp_items:
+                ref = (comp.refdes or "").strip()
+                if ref:
+                    comp_by_key[(ref, comp.kind)] = comp
+            for net in nets:
+                label = ""
+                for conn in net.get("connections", []):
+                    cdef = comp_defs.get(conn.component_kind)
+                    if cdef and getattr(cdef, "comp_type", "component") == "net":
+                        if cdef.net_name:
+                            label = cdef.net_name
+                            break
+                        comp = comp_by_key.get((conn.component_refdes, conn.component_kind))
+                        if comp is not None:
+                            label = comp.value.strip() or comp.refdes.strip()
+                            if label:
+                                break
+                if label:
+                    if label.strip().upper() in {"GND", "GROUND"}:
+                        label = "0"
+                    self._net_label_overrides[net["id"]] = label
+        except Exception:
+            self._net_label_overrides = saved
 
     def drawBackground(self, p: 'QPainter', rect: QRectF):
         if not self.grid_on: return
         g = self.grid_size
         left = int((rect.left()//g)*g); top = int((rect.top()//g)*g)
         p.save()
-        if self.grid_style == 'lines':
-            p.setPen(self._grid_pen_lines)
-            x = left
-            while x < rect.right(): p.drawLine(x, rect.top(), x, rect.bottom()); x += g
+        # Dotted grid with minor/major emphasis (major every 5 cells)
+        major_step = g * 5
+        minor_pen = QPen(self._grid_pen_dots.color(), 1)
+        minor_pen.setCosmetic(True)
+        minor_pen.setColor(self._grid_pen_dots.color())
+        major_pen = QPen(self._grid_pen_dots.color(), 2)
+        major_pen.setCosmetic(True)
+        major_pen.setColor(self._grid_pen_dots.color())
+        # Slightly dim minors
+        minor_color = minor_pen.color()
+        minor_color.setAlphaF(0.55)
+        minor_pen.setColor(minor_color)
+        major_color = major_pen.color()
+        major_color.setAlphaF(0.85)
+        major_pen.setColor(major_color)
+        x = left
+        while x < rect.right():
             y = top
-            while y < rect.bottom(): p.drawLine(rect.left(), y, rect.right(), y); y += g
-        else:
-            p.setPen(self._grid_pen_dots)
-            x = left
-            while x < rect.right():
-                y = top
-                while y < rect.bottom(): p.drawPoint(int(x), int(y)); y += g
-                x += g
+            is_major_x = (int(round(x)) % int(major_step) == 0)
+            while y < rect.bottom():
+                is_major = is_major_x and (int(round(y)) % int(major_step) == 0)
+                p.setPen(major_pen if is_major else minor_pen)
+                p.drawPoint(int(x), int(y))
+                y += g
+            x += g
         p.restore()
 
     def attach_view(self, view):
@@ -123,14 +175,22 @@ class SchematicScene(QGraphicsScene):
         self.component_to_place = kind
         self._remove_ghost(); self._ghost_kind = kind; self._ensure_ghost()
         if self._view: self._view.setDragMode(QGraphicsView.NoDrag)
-        self.status_label.setText(f"Place: {kind} (next {self._next_refdes(kind)}) – click to place, ESC to cancel, [ / ] to rotate")
+        comp_def = load_component_library().get(kind)
+        if comp_def and getattr(comp_def, "comp_type", "component") == "net":
+            self.status_label.setText(
+                f"Place: {kind} – click a wire to attach (Esc to cancel, [ / ] to rotate)"
+            )
+        else:
+            self.status_label.setText(
+                f"Place: {kind} (next {self._next_refdes(kind)}) – click to place, ESC to cancel, [ / ] to rotate"
+            )
 
     def set_mode_wire(self):
         self.mode = SchematicScene.Mode.WIRE
         self.component_to_place = None
         self._remove_ghost(); self._clear_temp_wire()
         if self._view: self._view.setDragMode(QGraphicsView.RubberBandDrag)
-        self.status_label.setText("Wire: click ports or wires, double click to finish (Esc/right-click to cancel)")
+        self.status_label.setText(f"Wire ({self._wire_mode_label()}): click ports or wires, double click to finish (Esc/right-click to cancel)")
 
     # helpers
     def _ensure_ghost(self):
@@ -171,14 +231,74 @@ class SchematicScene(QGraphicsScene):
             return lo - tol <= p.x() <= hi + tol
         return False
 
-    def _wire_contains_point(self, wire, p: QPointF, tol: float = 1e-4) -> bool:
-        pts = wire._manhattan_points()
+    def _wire_contains_point(self, wire, p: QPointF, tol: float | None = None) -> bool:
+        """Return True if point hits a wire segment (with tolerance)."""
+        pts = wire.render_points() if hasattr(wire, "render_points") else wire._manhattan_points()
         if not pts:
             return False
+        if tol is None:
+            gs = float(getattr(self, "grid_size", 20) or 20)
+            tol = max(1.0, gs * 0.1)
         for i in range(len(pts) - 1):
-            if self._point_on_orthogonal_segment(p, pts[i], pts[i + 1], tol):
+            if self._point_on_segment(p, pts[i], pts[i + 1], tol):
                 return True
         return False
+
+    def _point_on_segment(self, p: QPointF, a: QPointF, b: QPointF, tol: float = 1.0) -> bool:
+        ax, ay = a.x(), a.y()
+        bx, by = b.x(), b.y()
+        px, py = p.x(), p.y()
+        abx = bx - ax
+        aby = by - ay
+        ab2 = abx * abx + aby * aby
+        if ab2 < 1e-12:
+            return (px - ax) ** 2 + (py - ay) ** 2 <= tol * tol
+        t = ((px - ax) * abx + (py - ay) * aby) / ab2
+        if t < 0.0:
+            t = 0.0
+        elif t > 1.0:
+            t = 1.0
+        qx = ax + t * abx
+        qy = ay + t * aby
+        dx = px - qx
+        dy = py - qy
+        return (dx * dx + dy * dy) <= tol * tol
+
+    def _closest_point_on_segment(self, p: QPointF, a: QPointF, b: QPointF) -> QPointF:
+        ax, ay = a.x(), a.y()
+        bx, by = b.x(), b.y()
+        px, py = p.x(), p.y()
+        abx = bx - ax
+        aby = by - ay
+        ab2 = abx * abx + aby * aby
+        if ab2 < 1e-12:
+            return QPointF(ax, ay)
+        t = ((px - ax) * abx + (py - ay) * aby) / ab2
+        if t < 0.0:
+            t = 0.0
+        elif t > 1.0:
+            t = 1.0
+        return QPointF(ax + t * abx, ay + t * aby)
+
+    def _snap_to_wire(self, scene_pos: QPointF) -> QPointF | None:
+        if _WireItem is None:
+            return None
+        wires = [it for it in self.items() if isinstance(it, _WireItem)]
+        if not wires:
+            return None
+        gs = float(getattr(self, "grid_size", 20) or 20)
+        tol = max(6.0, gs * 0.6)
+        best = None
+        best_d2 = tol * tol
+        for w in wires:
+            pts = w.render_points() if hasattr(w, "render_points") else w._manhattan_points()
+            for i in range(len(pts) - 1):
+                q = self._closest_point_on_segment(scene_pos, pts[i], pts[i + 1])
+                d2 = (q.x() - scene_pos.x()) ** 2 + (q.y() - scene_pos.y()) ** 2
+                if d2 <= best_d2:
+                    best_d2 = d2
+                    best = q
+        return best
 
     def _wires_at_key(self, key: Tuple[float, float]):
         if _WireItem is None:
@@ -188,9 +308,14 @@ class SchematicScene(QGraphicsScene):
         return [w for w in wires if self._wire_contains_point(w, p)]
 
     def _register_wire_junction(self, p: QPointF):
+        """Create an explicit junction marker (wire-to-wire connection)."""
         key = self._net_point_key(p)
         self._wire_junctions.add(key)
         self._rebuild_junction_markers()
+
+    def _add_junction_owner(self, key: Tuple[float, float], wire):
+        owners = self._junction_owners.setdefault(key, set())
+        owners.add(wire)
 
     def _rebuild_junction_markers(self):
         """Show explicit wire junction nodes where wires are intentionally connected."""
@@ -228,6 +353,42 @@ class SchematicScene(QGraphicsScene):
     def _snap_point(self, p: QPointF) -> QPointF:
         if not self.snap_on: return p
         g = self.grid_size; return QPointF(round(p.x()/g)*g, round(p.y()/g)*g)
+
+    def _wire_mode_label(self) -> str:
+        return {"orth": "Orthogonal", "free": "Free", "45": "45°"} .get(self.wire_route_mode, "Orthogonal")
+
+    def _snap_for_mode(self, last: QPointF, raw: QPointF) -> QPointF:
+        """Mode-aware snap (orth / 45 / free)."""
+        if self.wire_route_mode == "free":
+            return self._snap_point(raw) if self.snap_on else raw
+        if self.wire_route_mode == "orth":
+            dx = raw.x() - last.x()
+            dy = raw.y() - last.y()
+            if abs(dx) >= abs(dy):
+                pt = QPointF(raw.x(), last.y())
+            else:
+                pt = QPointF(last.x(), raw.y())
+            return self._snap_point(pt) if self.snap_on else pt
+        # 45° mode: snap to horizontal/vertical/45 based on angle
+        dx = raw.x() - last.x()
+        dy = raw.y() - last.y()
+        if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+            return self._snap_point(raw) if self.snap_on else raw
+        adx = abs(dx)
+        ady = abs(dy)
+        if adx > 2 * ady:
+            pt = QPointF(raw.x(), last.y())
+        elif ady > 2 * adx:
+            pt = QPointF(last.x(), raw.y())
+        else:
+            d = max(adx, ady)
+            pt = QPointF(last.x() + (d if dx >= 0 else -d), last.y() + (d if dy >= 0 else -d))
+        return self._snap_point(pt) if self.snap_on else pt
+
+    def _is_45_or_orth(self, a: QPointF, b: QPointF) -> bool:
+        dx = abs(a.x() - b.x())
+        dy = abs(a.y() - b.y())
+        return dx < 1e-6 or dy < 1e-6 or abs(dx - dy) < 1e-6
 
     def _nearest_port(self, comp: ComponentItem, to_scene: QPointF) -> PortItem:
         ports = [p for p in getattr(comp, 'ports', []) if p is not None]
@@ -392,7 +553,7 @@ class SchematicScene(QGraphicsScene):
     def _prepare_wire_anchor(self, wire: "_WireItem", raw_pos: QPointF) -> QPointF:
         """Snap to the nearest point on the drawn wire and insert a junction waypoint."""
 
-        spine = wire._manhattan_points()
+        spine = wire.render_points() if hasattr(wire, "render_points") else wire._manhattan_points()
         if len(spine) < 2:
             snapped = self._snap_point(raw_pos)
             wire.set_points([snapped])
@@ -423,7 +584,7 @@ class SchematicScene(QGraphicsScene):
                 y = best_q.y()
             lo = min(best_a.y(), best_b.y()); hi = max(best_a.y(), best_b.y())
             snapped = QPointF(x, min(max(y, lo), hi))
-        else:
+        elif abs(best_a.y() - best_b.y()) < 1e-6:
             y = best_a.y()
             if self.snap_on:
                 x = round(best_q.x() / self.grid_size) * self.grid_size
@@ -431,6 +592,12 @@ class SchematicScene(QGraphicsScene):
                 x = best_q.x()
             lo = min(best_a.x(), best_b.x()); hi = max(best_a.x(), best_b.x())
             snapped = QPointF(min(max(x, lo), hi), y)
+        else:
+            snapped = best_q
+
+        # Snap junction to grid if enabled for consistent net keys.
+        if self.snap_on:
+            snapped = self._snap_point(snapped)
 
         # Insert the anchor into the spine (between insert_idx and insert_idx+1)
         new_spine = list(spine)
@@ -445,21 +612,43 @@ class SchematicScene(QGraphicsScene):
         # Strip endpoints before storing back on the wire
         wire.set_points(dedup[1:-1])
         self._register_wire_junction(snapped)
+        self._add_junction_owner(self._net_point_key(snapped), wire)
         return snapped
 
     def _start_temp_wire(self):
         from PySide6.QtWidgets import QGraphicsPathItem
         self._temp_dash = QGraphicsPathItem()
-        pen = QPen(Qt.black, 1)
+        pen = QPen(Qt.black, 1.2)
         pen.setCosmetic(True)
         pen.setStyle(Qt.DashLine)
         # theme-aware color
         if getattr(self, "theme", None):
             pen.setColor(self.theme.wire_selected if self.theme else pen.color())
+        else:
+            pen.setColor(QColor(255, 255, 0))
         self._temp_dash.setPen(pen)
-        self._temp_dash.setZValue(-1) # keep below wires so clicks hit targets
+        self._temp_dash.setZValue(4) # keep above grid for visibility
         self._temp_dash.setAcceptedMouseButtons(Qt.NoButton)
         self.addItem(self._temp_dash)
+
+    def _update_temp_wire_preview(self, scene_pos: QPointF):
+        """Update the dashed preview path while routing."""
+        if self._temp_dash is None:
+            return
+        start = self._route_start_port.scenePos() if self._route_start_port else (self._route_start_point or QPointF())
+        last = start if not self._route_pts else self._route_pts[-1]
+        cur = self._snap_for_mode(last, scene_pos)
+        if self.wire_route_mode == "orth":
+            seg = self._route_direct_manhattan(last, cur)
+        else:
+            seg = [last, cur]
+
+        path = QPainterPath(start)
+        for p in self._route_pts:
+            path.lineTo(p)
+        for p in seg[1:]:
+            path.lineTo(p)
+        self._temp_dash.setPath(path)
 
     def _clear_temp_wire(self):
         if getattr(self, "_temp_dash", None) is not None:
@@ -468,18 +657,36 @@ class SchematicScene(QGraphicsScene):
 
     # events
     def mousePressEvent(self, e):
+        """Main interaction handler for place/wire/selection modes."""
         scene_pos = e.scenePos()
         if self.mode == SchematicScene.Mode.PLACE and self.component_to_place:
             if e.button() == Qt.LeftButton:
-                if self._ghost_item is not None:
-                    pos = self._snap_point(self._ghost_item.scenePos())
-                else:
-                    pos = self._snap_point(scene_pos)
+                comp_def = load_component_library().get(self.component_to_place)
+                pos = None
+                if comp_def and getattr(comp_def, "comp_type", "component") == "net":
+                    pos = self._snap_to_wire(scene_pos)
+                if pos is None:
+                    if self._ghost_item is not None:
+                        pos = self._snap_point(self._ghost_item.scenePos())
+                    else:
+                        pos = self._snap_point(scene_pos)
                 comp = ComponentItem(self.component_to_place, pos)
                 theme = getattr(self, "theme", None)
                 if theme and hasattr(comp, "apply_theme"):
                     comp.apply_theme(theme)
                 comp.set_refdes(self._next_refdes(self.component_to_place))
+                comp_def = load_component_library().get(self.component_to_place)
+                if comp_def and getattr(comp_def, "comp_type", "component") == "net":
+                    if comp_def.net_name:
+                        comp.set_value(comp_def.net_name)
+                if comp_def and not comp.value:
+                    if comp_def.default_value:
+                        comp.set_value(comp_def.default_value)
+                    else:
+                        label = comp_def.value_label.lower()
+                        if "part" in label or comp_def.spice_type.upper() in {"D", "Q", "U", "X"}:
+                            if comp_def.display_name:
+                                comp.set_value(comp_def.display_name)
                 self.undo_stack.push(AddComponentCommand(self, comp))
                 self._bump_refseq(self.component_to_place)
                 if self._ghost_item: comp.setRotation(self._ghost_item.rotation())
@@ -505,6 +712,13 @@ class SchematicScene(QGraphicsScene):
                 if not self._routing:
                     #Start from a port or an existing wire anchor
                     if port is None and wire is None:
+                        # Start a free wire at the clicked point
+                        self._routing = True
+                        self._route_pts = []
+                        self._route_start_port = None
+                        self._route_start_point = self._snap_point(scene_pos)
+                        self._start_temp_wire()
+                        self._update_temp_wire_preview(scene_pos)
                         e.accept(); return
                     self._routing = True
                     self._route_pts = []                 # clear waypoints
@@ -512,10 +726,13 @@ class SchematicScene(QGraphicsScene):
                         anchor = self._prepare_wire_anchor(wire, scene_pos)
                         self._route_start_port = None
                         self._route_start_point = anchor
+                        self._junction_start_key = self._net_point_key(anchor)
                     else:
                         self._route_start_port = port
                         self._route_start_point = None
+                        self._junction_start_key = None
                     self._start_temp_wire()              # create dashed preview path
+                    self._update_temp_wire_preview(scene_pos)
                     e.accept(); return
                 else:
                     # we are routing
@@ -525,29 +742,31 @@ class SchematicScene(QGraphicsScene):
                         e.accept(); return
                     if wire is not None:
                         anchor = self._prepare_wire_anchor(wire, scene_pos)
-                        self._finish_routed_wire(end_port=None, end_point=anchor)
+                        self._finish_routed_wire(end_port=None, end_point=anchor, join_key=self._net_point_key(anchor))
                         e.accept(); return
 
-                    # otherwise, drop a snapped corner
-                    self._route_pts.append(self._snap_point(scene_pos))
+                    # otherwise, drop a corner based on the route mode
+                    last = self._route_start_port.scenePos() if self._route_start_port else (self._route_start_point or QPointF())
+                    if self._route_pts:
+                        last = self._route_pts[-1]
+                    pt = self._snap_for_mode(last, scene_pos)
+                    self._route_pts.append(pt)
                     e.accept(); return
         super().mousePressEvent(e)
 
     def mouseMoveEvent(self, e):
         if self.mode == SchematicScene.Mode.PLACE and self._ghost_item is not None:
-            self._ghost_item.setPos(self._snap_point(e.scenePos()))
+            comp_def = load_component_library().get(self._ghost_kind or "")
+            if comp_def and getattr(comp_def, "comp_type", "component") == "net":
+                snap = self._snap_to_wire(e.scenePos())
+                if snap is not None:
+                    self._ghost_item.setPos(snap)
+                else:
+                    self._ghost_item.setPos(self._snap_point(e.scenePos()))
+            else:
+                self._ghost_item.setPos(self._snap_point(e.scenePos()))
         if self.mode == SchematicScene.Mode.WIRE and self._routing and self._temp_dash is not None:
-            start = self._route_start_port.scenePos() if self._route_start_port else (self._route_start_point or QPointF())
-            last = start if not self._route_pts else self._route_pts[-1]
-            cur = e.scenePos()
-            seg = self._route_direct_manhattan(last, cur)
-
-            path = QPainterPath(start)
-            for p in self._route_pts:
-                path.lineTo(p)
-            for p in seg[1:]:
-                path.lineTo(p)
-            self._temp_dash.setPath(path)
+            self._update_temp_wire_preview(e.scenePos())
         super().mouseMoveEvent(e)
 
     def keyPressEvent(self, e):
@@ -567,6 +786,12 @@ class SchematicScene(QGraphicsScene):
             self.status_label.setText(f"Grid style: {self.grid_style}"); self.update(); e.accept(); return
         if e.key() == Qt.Key_S and (e.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier)) == (Qt.ControlModifier | Qt.ShiftModifier):
             self.snap_on = not self.snap_on; self.status_label.setText(f"Snap: {'ON' if self.snap_on else 'OFF'} (grid {self.grid_size})"); e.accept(); return
+        if e.key() == Qt.Key_W and (e.modifiers() & Qt.ShiftModifier):
+            order = ["orth", "45", "free"]
+            idx = order.index(self.wire_route_mode) if self.wire_route_mode in order else 0
+            self.wire_route_mode = order[(idx + 1) % len(order)]
+            self.status_label.setText(f"Wire mode: {self._wire_mode_label()} (Shift+W to cycle)")
+            e.accept(); return
         if self.mode == SchematicScene.Mode.PLACE and self._ghost_item is not None:
             if e.key() == Qt.Key_BracketRight:
                 self._ghost_item.setRotation((self._ghost_item.rotation()+90)%360); e.accept(); return
@@ -622,6 +847,13 @@ class SchematicScene(QGraphicsScene):
     def _net_point_key(self, p: QPointF) -> Tuple[float, float]:
         return (round(p.x(), 4), round(p.y(), 4))
 
+    def _label_key(self, label: str) -> Tuple[float, float]:
+        data = label.encode("utf-8")
+        h = zlib.adler32(data) & 0xFFFFFFFF
+        hi = (h >> 16) & 0xFFFF
+        lo = h & 0xFFFF
+        return (float(hi), float(lo))
+
     def net_data(self) -> List[Dict]:
         """Return computed net metadata for panels and highlighting."""
         from .netlist_exporter import NetConnection, NetlistBuilder, _UnionFind
@@ -638,7 +870,7 @@ class SchematicScene(QGraphicsScene):
             wire_nodes[w] = key
             node_to_wire[key] = w
             uf.add(key)
-            pts = w._manhattan_points()
+            pts = w.render_points() if hasattr(w, "render_points") else w._manhattan_points()
             wire_points[w] = [self._net_point_key(p) for p in pts] if pts else []
 
         port_connections: Dict[Tuple[str, int], List[NetConnection]] = {}
@@ -665,14 +897,20 @@ class SchematicScene(QGraphicsScene):
 
         # Wire-to-wire joins only happen at explicit junction nodes.
         active_junctions: set[Tuple[float, float]] = set()
-        for key in self._wire_junctions:
-            owners = self._wires_at_key(key)
+        for key in list(self._wire_junctions):
+            owners = list(self._junction_owners.get(key, set()))
+            if not owners:
+                owners = self._wires_at_key(key)
             if len(owners) < 2:
                 continue
             active_junctions.add(key)
-            base = wire_nodes[owners[0]]
+            base = wire_nodes.get(owners[0])
+            if base is None:
+                continue
             for w in owners[1:]:
-                uf.union(base, wire_nodes[w])
+                node = wire_nodes.get(w)
+                if node is not None:
+                    uf.union(base, node)
         self._wire_junctions = active_junctions
 
         nets: List[Dict] = []
@@ -700,21 +938,54 @@ class SchematicScene(QGraphicsScene):
             sequence += 1
             default_name = NetlistBuilder._default_net_namer(connections, sequence)
             net_id = min(id_points) if id_points else (float(sequence), 0.0)
-            name = self._net_name_overrides.get(net_id, default_name)
+            label_name = self._net_label_overrides.get(net_id, "")
+            name = label_name or self._net_name_overrides.get(net_id, default_name)
             nets.append({
                 "id": net_id,
                 "name": name,
                 "default_name": default_name,
+                "label_name": label_name,
                 "connections": connections,
                 "wires": list(wires_for_net),
             })
             live_keys.add(net_id)
 
-        stale_keys = set(self._net_name_overrides.keys()) - live_keys
+        # Merge nets that share a label name (power/flags). These are global nets.
+        merged: List[Dict] = []
+        by_label: Dict[str, Dict] = {}
+        for net in nets:
+            label = (net.get("label_name") or "").strip()
+            if label:
+                bucket = by_label.get(label)
+                if bucket is None:
+                    label_id = self._label_key(label)
+                    bucket = {
+                        "id": label_id,
+                        "name": label,
+                        "default_name": label,
+                        "label_name": label,
+                        "connections": [],
+                        "wires": [],
+                    }
+                    by_label[label] = bucket
+                    merged.append(bucket)
+                bucket["connections"].extend(net.get("connections", []))
+                bucket["wires"].extend(net.get("wires", []))
+            else:
+                merged.append(net)
+
+        # De-dup wires per merged net
+        for net in merged:
+            if net.get("wires"):
+                net["wires"] = list(dict.fromkeys(net["wires"]))
+
+        # Only keep manual overrides for non-labeled nets.
+        live_non_label = {n["id"] for n in merged if not n.get("label_name")}
+        stale_keys = set(self._net_name_overrides.keys()) - live_non_label
         for key in stale_keys:
             self._net_name_overrides.pop(key, None)
 
-        return nets
+        return merged
 
     def set_net_name(self, net_id: Tuple[float, float], name: str, default_name: str):
         cleaned = name.strip()
@@ -744,6 +1015,7 @@ class SchematicScene(QGraphicsScene):
         return builder.export(self)
     
     def serialize(self) -> Dict:
+        """Serialize the schematic to a JSON-friendly dict."""
         comps = [it for it in self.items() if isinstance(it, ComponentItem)]
         port_ref: Dict[PortItem, Tuple[int, str]] = {}
         for idx, c in enumerate(comps):
@@ -766,6 +1038,7 @@ class SchematicScene(QGraphicsScene):
             entry = {
                 'points': [{'x': float(p.x()), 'y': float(p.y())} for p in pts]
             }
+            entry["mode"] = getattr(w, "route_mode", "orth")
             color_hex = w.wire_color_hex() if hasattr(w, "wire_color_hex") else ""
             if color_hex:
                 entry["color"] = color_hex
@@ -803,6 +1076,7 @@ class SchematicScene(QGraphicsScene):
         }
 
     def load(self, data: Dict):
+        """Load schematic data from a dict (inverse of serialize)."""
         for it in list(self.items()): self.removeItem(it)
         s = data.get('settings', {})
         self.grid_on = s.get('grid_on', self.grid_on); self.grid_size = s.get('grid_size', self.grid_size)
@@ -826,6 +1100,18 @@ class SchematicScene(QGraphicsScene):
             c.set_refdes(cdata.get('refdes', "")); c.set_value(cdata.get('value', ""))
             if hasattr(c, "apply_labels_state"):
                 c.apply_labels_state(cdata.get('labels', {}))
+            if not c.value:
+                cdef = load_component_library().get(kind)
+                if cdef:
+                    if getattr(cdef, "comp_type", "component") == "net" and cdef.net_name:
+                        c.set_value(cdef.net_name)
+                    elif cdef.default_value:
+                        c.set_value(cdef.default_value)
+                    else:
+                        label = cdef.value_label.lower()
+                        if "part" in label or cdef.spice_type.upper() in {"D", "Q", "U", "X"}:
+                            if cdef.display_name:
+                                c.set_value(cdef.display_name)
             self.addItem(c); comps.append(c)
         for wdata in data.get('wires', []):
             (ai, aside) = wdata.get('a', [None, None]); (bi, bside) = wdata.get('b', [None, None])
@@ -845,7 +1131,8 @@ class SchematicScene(QGraphicsScene):
                 elif b_point:
                     end_point = QPointF(b_point['x'], b_point['y'])
 
-                wire = WireItem(pa, pb, start_point=start_point, end_point=end_point, theme=getattr(self, "theme", None))
+                route_mode = wdata.get("mode", "orth")
+                wire = WireItem(pa, pb, start_point=start_point, end_point=end_point, theme=getattr(self, "theme", None), route_mode=route_mode)
                 pts = [QPointF(d['x'], d['y']) for d in wdata.get('points', [])]
                 if pts:
                     wire.set_points(pts)
@@ -865,7 +1152,7 @@ class SchematicScene(QGraphicsScene):
         # Accept Option/Alt, Shift, or Command (Meta on macOS)
         return bool(mods & (Qt.AltModifier | Qt.ShiftModifier | Qt.MetaModifier))
     
-    def _finish_routed_wire(self, *, end_port: "PortItem" | None = None, end_point: QPointF | None = None):
+    def _finish_routed_wire(self, *, end_port: "PortItem" | None = None, end_point: QPointF | None = None, join_key: Tuple[float, float] | None = None):
         """Create a WireItem from the current routing state, with simple obstacle-avoiding orthogonal routing."""
         from .graphics_items import WireItem
         from .commands import AddWireCommand, SetWirePointsCommand
@@ -886,10 +1173,21 @@ class SchematicScene(QGraphicsScene):
             anchors.append(self._snap_point(p))
         anchors.append(self._snap_point(b_end))
 
-        # Route between consecutive anchors (simple Manhattan, no obstacle checks)
+        # Route between consecutive anchors (mode-aware)
         routed: list[QPointF] = []
         for i in range(len(anchors) - 1):
-            seg = self._route_direct_manhattan(anchors[i], anchors[i + 1])
+            a = anchors[i]
+            b = anchors[i + 1]
+            if self.wire_route_mode == "orth":
+                seg = self._route_direct_manhattan(a, b)
+            elif self.wire_route_mode == "free":
+                seg = [a, b]
+            else:  # 45°
+                if self._is_45_or_orth(a, b):
+                    seg = [a, b]
+                else:
+                    mid = QPointF(b.x(), a.y())
+                    seg = self._simplify_points([a, mid, b])
             if not routed:
                 routed.extend(seg)
             else:
@@ -911,6 +1209,7 @@ class SchematicScene(QGraphicsScene):
             end_point=end_point,
             cap_len=0.0,
             attach_end_waypoints=bool(start_port is not None or end_port is not None),
+            route_mode=self.wire_route_mode,
         )
 
         self.undo_stack.beginMacro("Add Routed Wire")
@@ -919,12 +1218,21 @@ class SchematicScene(QGraphicsScene):
             self.undo_stack.push(SetWirePointsCommand(w, waypoints))
         self.undo_stack.endMacro()
 
+        if join_key is not None:
+            self._register_wire_junction(QPointF(join_key[0], join_key[1]))
+            self._add_junction_owner(join_key, w)
+        if getattr(self, "_junction_start_key", None) is not None:
+            key = self._junction_start_key
+            self._register_wire_junction(QPointF(key[0], key[1]))
+            self._add_junction_owner(key, w)
+
         # reset temp state
         self._clear_temp_wire()
         self._routing = False
         self._route_pts = []
         self._route_start_port = None
         self._route_start_point = None
+        self._junction_start_key = None
     def mouseDoubleClickEvent(self, e):
         # Finish routed wire on double-click
         if self.mode == SchematicScene.Mode.WIRE and getattr(self, "_routing", False):
@@ -939,7 +1247,11 @@ class SchematicScene(QGraphicsScene):
                 self._finish_routed_wire(end_port=None, end_point=anchor)
             else:
                 #Finish with a free endpoint at the double-click position
-                self._finish_routed_wire(end_point=self._snap_point(e.scenePos()))
+                last = self._route_start_port.scenePos() if self._route_start_port else (self._route_start_point or QPointF())
+                if self._route_pts:
+                    last = self._route_pts[-1]
+                endp = self._snap_for_mode(last, e.scenePos())
+                self._finish_routed_wire(end_point=endp)
 
             e.accept()
             return

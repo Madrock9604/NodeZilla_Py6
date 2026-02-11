@@ -1,0 +1,27 @@
+{
+  "kind": "1N4001",
+  "display_name": "1N4001",
+  "category": "Semiconductor / Diode",
+  "prefix": "D",
+  "shortcut": "",
+  "spice_type": "D",
+  "value_label": "Part Number",
+  "default_value": "1N4001",
+  "type": "component",
+  "net_name": "",
+  "symbol": "custom/1N4001.json",
+  "auto_align_terminals": false,
+  "auto_scale_symbol": false,
+  "ports": [
+    {
+      "name": "P1",
+      "x": -50.0,
+      "y": 0.0
+    },
+    {
+      "name": "P2",
+      "x": 40.0,
+      "y": 0.0
+    }
+  ]
+}

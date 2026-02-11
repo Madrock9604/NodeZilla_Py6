@@ -30,6 +30,7 @@ def _auto_contrast_color(bg: QColor) -> QColor:
 
 
 class InlineLabel(QGraphicsTextItem):
+    """Draggable label bound to a ComponentItem (refdes or value)."""
     def __init__(self, parent_item: 'ComponentItem', kind: str):
         super().__init__("", parent_item)
         self._parent = parent_item
@@ -67,6 +68,7 @@ class InlineLabel(QGraphicsTextItem):
 
 
 class PortItem(QGraphicsEllipseItem):
+    """Terminal pin on a ComponentItem; drives wire updates."""
     def __init__(self, parent: 'ComponentItem', name: str, rel_pos: QPointF):
         super().__init__(-PORT_RADIUS, -PORT_RADIUS, 2*PORT_RADIUS, 2*PORT_RADIUS, parent)
         self.setBrush(QBrush(Qt.white))
@@ -131,6 +133,10 @@ class JsonSymbolItem(QGraphicsPathItem):
         self.setZValue(2)
 
 class ComponentItem(QGraphicsRectItem):
+    """Component graphics + ports + labels.
+
+    Uses component_library to load symbol + port definitions.
+    """
     def __init__(self, kind: str, pos: QPointF):
         super().__init__(-COMP_WIDTH/2, -COMP_HEIGHT/2, COMP_WIDTH, COMP_HEIGHT)
         init_pos = QPointF(pos)
@@ -221,11 +227,13 @@ class ComponentItem(QGraphicsRectItem):
         self._debug_label.setZValue(5)
 
     def _update_label(self):
+        """Update label text/visibility and place defaults if not manually moved."""
         from PySide6.QtWidgets import QApplication
         sc = self.scene()
         theme = getattr(sc, "theme", None) if sc else None
         ref_text = self.refdes.strip()
         val_text = self.value.strip()
+        is_net = bool(self._comp_def and getattr(self._comp_def, "comp_type", "component") == "net")
         if theme:
             self.refdes_label.setDefaultTextColor(theme.text)
             self.value_label.setDefaultTextColor(theme.text)
@@ -238,10 +246,18 @@ class ComponentItem(QGraphicsRectItem):
         self.value_label.setPlainText(val_text)
 
         br = self.routing_local_rect()
+        self.refdes_label.setVisible(not is_net)
         if not self.refdes_label._manual_pos:
             self.refdes_label.set_default_pos(QPointF(-self.refdes_label.boundingRect().width() / 2, br.top() - 18))
         if not self.value_label._manual_pos:
-            self.value_label.set_default_pos(QPointF(-self.value_label.boundingRect().width() / 2, br.bottom() + 4))
+            if is_net:
+                self.value_label.set_default_pos(
+                    QPointF(br.right() + 6, -self.value_label.boundingRect().height() / 2)
+                )
+            else:
+                self.value_label.set_default_pos(
+                    QPointF(-self.value_label.boundingRect().width() / 2, br.bottom() + 4)
+                )
 
         # Keep text upright while component rotates.
         self.refdes_label.setRotation(-self.rotation())
@@ -254,6 +270,10 @@ class ComponentItem(QGraphicsRectItem):
     def set_value(self, value: str):
         self.value = value
         self._update_label()
+        if self._comp_def and getattr(self._comp_def, "comp_type", "component") == "net":
+            sc = self.scene()
+            if sc and hasattr(sc, "_schedule_nets_changed"):
+                sc._schedule_nets_changed()
 
     def labels_state(self) -> dict:
         return {
@@ -290,6 +310,7 @@ class ComponentItem(QGraphicsRectItem):
         return r.adjusted(-2, -2, 2, 2)
 
     def routing_local_rect(self) -> QRectF:
+        """Tight component rect used by the router (ignores labels)."""
         r = QRectF(-COMP_WIDTH / 2, -COMP_HEIGHT / 2, COMP_WIDTH, COMP_HEIGHT)
         if self.symbol_item is not None:
             r = r.united(self.symbol_item.mapRectToParent(self.symbol_item.boundingRect()))
@@ -318,6 +339,7 @@ class ComponentItem(QGraphicsRectItem):
         return None
     
     def _load_symbol_graphic(self):
+        """Load a JSON symbol and convert it to a QPainterPath."""
         path = self._symbol_path_for_kind()
         if path is None:
             self.symbol_item = None
@@ -371,6 +393,7 @@ class ComponentItem(QGraphicsRectItem):
             return
 
     def _fit_symbol_to_body(self):
+        """Scale/align symbol to component body (optional)."""
         if not self.symbol_item:
             return
         if not getattr(self, "_auto_scale_symbol", True):
@@ -489,6 +512,7 @@ class ComponentItem(QGraphicsRectItem):
 
 
 class WireItem(QGraphicsPathItem):
+    """Wire with optional waypoints, route mode, and selection handles."""
     def __init__(
             self,
             start_port: Optional[PortItem],
@@ -500,6 +524,7 @@ class WireItem(QGraphicsPathItem):
             end_point: QPointF | None = None,
             attach_end_waypoints: bool = False,
             cap_len: float | None = None,
+            route_mode: str = "orth",
     ):
         super().__init__()
         self.setZValue(0)
@@ -513,6 +538,7 @@ class WireItem(QGraphicsPathItem):
         self._end_point = QPointF(end_point) if end_point is not None else None
         self._pts: List[QPointF] = list(points) if points else []
         self._custom_color: QColor | None = None
+        self.route_mode = route_mode
         self._handles: list[_Handle] = []
         self._segment_handles: list[_SegmentHandle] = []
         self._updating_handles = False
@@ -563,11 +589,12 @@ class WireItem(QGraphicsPathItem):
             sc = self.scene(); theme = getattr(sc, "theme", None)
             if theme:
                 self.apply_theme(theme, selected=bool(value))
-            self._rebuild_handles()
-            for h in self._handles:
-                h.setVisible(bool(value))
-            for h in self._segment_handles:
-                h.setVisible(bool(value))
+            if self.route_mode == "orth":
+                self._rebuild_handles()
+                for h in self._handles:
+                    h.setVisible(bool(value))
+                for h in self._segment_handles:
+                    h.setVisible(bool(value))
         elif change == QGraphicsItem.ItemSceneHasChanged:
             sc = self.scene(); theme = getattr(sc, "theme", None)
             if theme:
@@ -611,7 +638,7 @@ class WireItem(QGraphicsPathItem):
         return out
 
     def update_path(self):
-        pts = self._manhattan_points()
+        pts = self.render_points()
         if not pts:
             self.setPath(QPainterPath())
             return
@@ -640,6 +667,8 @@ class WireItem(QGraphicsPathItem):
             self.port_b.add_wire(self)
 
     def _rebuild_handles(self):
+        if self.route_mode != "orth":
+            return
         sc = self.scene()
         self._clear_handles(sc)
         self._updating_handles = True
@@ -660,6 +689,8 @@ class WireItem(QGraphicsPathItem):
 
     def _sync_handles(self):
         if self._updating_handles:
+            return
+        if self.route_mode != "orth":
             return
         self._updating_handles = True
         for i, h in enumerate(self._handles):
@@ -702,6 +733,11 @@ class WireItem(QGraphicsPathItem):
             self._pts = []
         else:
             self._pts = [QPointF(p) for p in spine[1:-1]]
+
+    def render_points(self) -> list[QPointF]:
+        if self.route_mode == "orth":
+            return self._manhattan_points()
+        return self.points()
 
 
 class _Handle(QGraphicsEllipseItem):

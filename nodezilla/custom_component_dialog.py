@@ -9,12 +9,13 @@ from PySide6.QtCore import Qt, QPointF, QRectF, QSize, QLineF, QEvent
 from PySide6.QtGui import QPen, QPainterPath, QPainter, QAction
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QPushButton,
-    QTableWidget, QTableWidgetItem, QGraphicsView, QGraphicsScene, QLabel,
+    QTableWidget, QTableWidgetItem, QGraphicsView, QGraphicsScene, QLabel, QWidget,
     QMessageBox, QSpinBox, QCheckBox, QGraphicsLineItem, QGraphicsRectItem,
-    QGraphicsEllipseItem, QGraphicsPathItem, QGraphicsTextItem, QGraphicsItem
+    QGraphicsEllipseItem, QGraphicsPathItem, QGraphicsTextItem, QGraphicsItem,
+    QComboBox, QFileDialog
 )
 
-from .component_library import load_component_library
+from .component_library import load_component_library, find_component_file
 from .graphics_items import COMP_WIDTH, COMP_HEIGHT
 
 
@@ -46,11 +47,24 @@ class _GridView(QGraphicsView):
         left = int((rect.left() // g) * g)
         top = int((rect.top() // g) * g)
         p.save()
-        p.setPen(QPen(Qt.darkGray, 1, Qt.DotLine))
+        # Dotted grid with minor/major emphasis (major every 5 cells)
+        major_step = g * 5
+        minor_pen = QPen(Qt.darkGray, 1)
+        minor_pen.setCosmetic(True)
+        minor_color = minor_pen.color()
+        minor_color.setAlphaF(0.55)
+        minor_pen.setColor(minor_color)
+        major_pen = QPen(Qt.darkGray, 2)
+        major_pen.setCosmetic(True)
+        major_color = major_pen.color()
+        major_color.setAlphaF(0.85)
+        major_pen.setColor(major_color)
         x = left
         while x < rect.right():
             y = top
             while y < rect.bottom():
+                is_major = (int(round(x)) % int(major_step) == 0) and (int(round(y)) % int(major_step) == 0)
+                p.setPen(major_pen if is_major else minor_pen)
                 p.drawPoint(int(x), int(y))
                 y += g
             x += g
@@ -158,6 +172,7 @@ class _PinItem(QGraphicsEllipseItem):
 
 
 class CustomComponentDialog(QDialog):
+    """Interactive symbol/pin editor for creating custom components."""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Create Custom Component")
@@ -169,6 +184,11 @@ class CustomComponentDialog(QDialog):
         self._poly_points: List[QPointF] = []
         self._poly_item = None
         self._pin_items: List[_PinItem] = []
+        self._copy_buffer: List[dict] = []
+        self._pin_prefix = "P"
+        self._pin_index = 1
+        self._pin_edge_snap = True
+        self._pin_edge_tol = 8.0
 
         root = QHBoxLayout(self)
 
@@ -204,11 +224,15 @@ class CustomComponentDialog(QDialog):
         self.dup_btn = QPushButton("Duplicate")
         self.rotate_l_btn = QPushButton("Rotate ⟲")
         self.rotate_r_btn = QPushButton("Rotate ⟳")
+        self.mirror_h_btn = QPushButton("Mirror H")
+        self.mirror_v_btn = QPushButton("Mirror V")
         self.clear_btn = QPushButton("Clear")
         modifiers.addWidget(self.delete_btn)
         modifiers.addWidget(self.dup_btn)
         modifiers.addWidget(self.rotate_l_btn)
         modifiers.addWidget(self.rotate_r_btn)
+        modifiers.addWidget(self.mirror_h_btn)
+        modifiers.addWidget(self.mirror_v_btn)
         modifiers.addWidget(self.clear_btn)
         modifiers.addStretch(1)
 
@@ -220,10 +244,18 @@ class CustomComponentDialog(QDialog):
         self.grid_spin = QSpinBox()
         self.grid_spin.setRange(2, 50)
         self.grid_spin.setValue(10)
+        self.pin_edge_chk = QCheckBox("Pin Edge Snap")
+        self.pin_edge_chk.setChecked(True)
+        self.pin_edge_tol_spin = QSpinBox()
+        self.pin_edge_tol_spin.setRange(2, 50)
+        self.pin_edge_tol_spin.setValue(8)
         snap_row.addWidget(self.snap_chk)
         snap_row.addWidget(self.grid_chk)
         snap_row.addWidget(QLabel("Grid:"))
         snap_row.addWidget(self.grid_spin)
+        snap_row.addWidget(self.pin_edge_chk)
+        snap_row.addWidget(QLabel("Tol:"))
+        snap_row.addWidget(self.pin_edge_tol_spin)
         snap_row.addStretch(1)
 
         left.addLayout(tools)
@@ -237,14 +269,40 @@ class CustomComponentDialog(QDialog):
         self.display_edit = QLineEdit()
         self.prefix_edit = QLineEdit()
         self.category_edit = QLineEdit("Custom")
+        self.category_btn = QPushButton("Choose…")
+        self.category_refresh_btn = QPushButton("↻")
         self.shortcut_edit = QLineEdit()
-        form.addRow("Kind", self.kind_edit)
+        self.spice_type_edit = QLineEdit()
+        self.type_combo = QComboBox()
+        self.type_combo.addItems(["Component", "Net Label"])
+        self.net_name_edit = QLineEdit()
+        form.addRow("Kind (Unique ID)", self.kind_edit)
         form.addRow("Display", self.display_edit)
         form.addRow("Prefix", self.prefix_edit)
-        form.addRow("Category", self.category_edit)
+        cat_row = QWidget()
+        cat_row_layout = QHBoxLayout(cat_row)
+        cat_row_layout.setContentsMargins(0, 0, 0, 0)
+        cat_row_layout.addWidget(self.category_edit, 1)
+        cat_row_layout.addWidget(self.category_btn, 0)
+        cat_row_layout.addWidget(self.category_refresh_btn, 0)
+        form.addRow("Category", cat_row)
         form.addRow("Shortcut", self.shortcut_edit)
+        form.addRow("SPICE Type", self.spice_type_edit)
+        form.addRow("Type", self.type_combo)
+        form.addRow("Net Name", self.net_name_edit)
 
         right.addLayout(form)
+        pin_row = QHBoxLayout()
+        self.pin_prefix_edit = QLineEdit("P")
+        self.pin_index_spin = QSpinBox()
+        self.pin_index_spin.setRange(1, 999)
+        self.pin_index_spin.setValue(1)
+        pin_row.addWidget(QLabel("Prefix"))
+        pin_row.addWidget(self.pin_prefix_edit)
+        pin_row.addWidget(QLabel("Start"))
+        pin_row.addWidget(self.pin_index_spin)
+        pin_row.addStretch(1)
+        right.addLayout(pin_row)
         right.addWidget(QLabel("Pins"))
         self.pin_table = QTableWidget(0, 3)
         self.pin_table.setHorizontalHeaderLabels(["Name", "X", "Y"])
@@ -274,20 +332,33 @@ class CustomComponentDialog(QDialog):
         self.dup_btn.clicked.connect(self._duplicate_selected)
         self.rotate_l_btn.clicked.connect(lambda: self._rotate_selected(-90))
         self.rotate_r_btn.clicked.connect(lambda: self._rotate_selected(90))
+        self.mirror_h_btn.clicked.connect(lambda: self._mirror_selected(horizontal=True))
+        self.mirror_v_btn.clicked.connect(lambda: self._mirror_selected(horizontal=False))
         self.clear_btn.clicked.connect(self._clear_canvas)
+        self.category_btn.clicked.connect(self._choose_category_folder)
+        self.category_refresh_btn.clicked.connect(self._refresh_category_folder)
 
         self.snap_chk.toggled.connect(self._sync_snap)
         self.grid_chk.toggled.connect(self._sync_snap)
         self.grid_spin.valueChanged.connect(self._sync_snap)
+        self.pin_edge_chk.toggled.connect(self._sync_pin_snap)
+        self.pin_edge_tol_spin.valueChanged.connect(self._sync_pin_snap)
 
         self.cancel_btn.clicked.connect(self.reject)
         self.save_btn.clicked.connect(self._save_component)
         self.pin_table.itemChanged.connect(self._pin_table_changed)
+        self.type_combo.currentTextChanged.connect(self._sync_type_fields)
+        self.pin_prefix_edit.textChanged.connect(self._sync_pin_defaults)
+        self.pin_index_spin.valueChanged.connect(self._sync_pin_defaults)
 
         self._set_tool("select")
         self._sync_snap()
+        self._sync_pin_defaults()
+        self._sync_pin_snap()
+        self._sync_type_fields()
         self.view.viewport().installEventFilter(self)
         self._editing_kind: str | None = None
+        self._editing_path: Path | None = None
 
     def _sync_snap(self):
         self.view.snap_on = self.snap_chk.isChecked()
@@ -295,7 +366,96 @@ class CustomComponentDialog(QDialog):
         self.view.grid_size = int(self.grid_spin.value())
         self.view.viewport().update()
 
+    def _sync_pin_defaults(self):
+        self._pin_prefix = self.pin_prefix_edit.text().strip() or "P"
+        self._pin_index = int(self.pin_index_spin.value())
+
+    def _sync_pin_snap(self):
+        self._pin_edge_snap = self.pin_edge_chk.isChecked()
+        self._pin_edge_tol = float(self.pin_edge_tol_spin.value())
+
+    def _next_pin_name(self) -> str:
+        name = f"{self._pin_prefix}{self._pin_index}"
+        self._pin_index += 1
+        self.pin_index_spin.setValue(self._pin_index)
+        return name
+
+    def _snap_to_guide_edge(self, pos: QPointF) -> QPointF:
+        if not self._pin_edge_snap:
+            return pos
+        r = self._guide_rect.rect()
+        tol = self._pin_edge_tol
+        x = pos.x()
+        y = pos.y()
+        edges = [
+            (abs(x - r.left()), "x", r.left()),
+            (abs(x - r.right()), "x", r.right()),
+            (abs(y - r.top()), "y", r.top()),
+            (abs(y - r.bottom()), "y", r.bottom()),
+        ]
+        edges.sort(key=lambda t: t[0])
+        if edges and edges[0][0] <= tol:
+            axis = edges[0][1]
+            val = edges[0][2]
+            if axis == "x":
+                x = val
+            else:
+                y = val
+        return QPointF(x, y)
+
+    def _constrain_point(self, start: QPointF, pos: QPointF, tool: str) -> QPointF:
+        dx = pos.x() - start.x()
+        dy = pos.y() - start.y()
+        if tool in ("rect", "ellipse"):
+            size = max(abs(dx), abs(dy))
+            dx = size if dx >= 0 else -size
+            dy = size if dy >= 0 else -size
+            return QPointF(start.x() + dx, start.y() + dy)
+        # line/poly constraint to 0/45/90
+        adx = abs(dx)
+        ady = abs(dy)
+        if adx < 1e-6 and ady < 1e-6:
+            return pos
+        if adx > 2 * ady:
+            return QPointF(pos.x(), start.y())
+        if ady > 2 * adx:
+            return QPointF(start.x(), pos.y())
+        d = max(adx, ady)
+        return QPointF(start.x() + (d if dx >= 0 else -d), start.y() + (d if dy >= 0 else -d))
+
+    def _choose_category_folder(self):
+        root = Path(__file__).resolve().parent.parent / "assets" / "components" / "library"
+        root.mkdir(parents=True, exist_ok=True)
+        folder = QFileDialog.getExistingDirectory(self, "Choose Category Folder", str(root))
+        if not folder:
+            return
+        try:
+            rel = Path(folder).resolve().relative_to(root.resolve())
+            parts = [p.replace("_", " ") for p in rel.parts if p]
+            self.category_edit.setText(" / ".join(parts) if parts else "Custom")
+        except Exception:
+            self.category_edit.setText("Custom")
+
+    def _refresh_category_folder(self):
+        root = Path(__file__).resolve().parent.parent / "assets" / "components" / "library"
+        root.mkdir(parents=True, exist_ok=True)
+        current = self.category_edit.text().strip()
+        if current:
+            parts = [p.strip() for p in current.replace(" / ", "/").split("/") if p.strip()]
+            folder = root.joinpath(*[p.replace(" ", "_") for p in parts])
+        else:
+            folder = root
+        if folder.exists():
+            self.category_edit.setText(current)
+        else:
+            self.category_edit.setText("Custom")
+
+    def _sync_type_fields(self):
+        is_net = self.type_combo.currentText().lower().startswith("net")
+        self.net_name_edit.setEnabled(is_net)
+
     def _set_tool(self, tool: str):
+        """Set the active drawing tool and reset transient state."""
         self._tool = tool
         for btn, name in [
             (self.select_btn, "select"),
@@ -327,6 +487,12 @@ class CustomComponentDialog(QDialog):
         self._poly_points = []
         self._poly_item = None
         self._editing_kind = None
+        self._editing_path = None
+        self.type_combo.setCurrentText("Component")
+        self.net_name_edit.setText("")
+        self._sync_type_fields()
+        self._copy_buffer.clear()
+        self.pin_index_spin.setValue(1)
 
     def _delete_selected(self):
         for item in list(self.scene.selectedItems()):
@@ -346,6 +512,17 @@ class CustomComponentDialog(QDialog):
                 self.scene.addItem(clone)
         self._pin_items = [p for p in self._pin_items if p.scene() is not None]
         self._refresh_pin_table()
+
+    def _mirror_selected(self, horizontal: bool = True):
+        for item in self.scene.selectedItems():
+            if item is self._guide_rect:
+                continue
+            item.setTransformOriginPoint(item.boundingRect().center())
+            sx = -1 if horizontal else 1
+            sy = -1 if not horizontal else 1
+            t = item.transform()
+            item.setTransform(t.scale(sx, sy))
+        self._pin_moved(None)
 
     def _rotate_selected(self, angle: float):
         for item in self.scene.selectedItems():
@@ -410,7 +587,69 @@ class CustomComponentDialog(QDialog):
             return it
         return None
 
+    def _serialize_item(self, item) -> Optional[dict]:
+        if item is self._guide_rect:
+            return None
+        if item.data(0) == "pin":
+            return {"type": "pin", "name": item.name, "pos": [item.pos().x(), item.pos().y()]}
+        if isinstance(item, QGraphicsLineItem):
+            ln = item.line()
+            return {"type": "line", "line": [ln.x1(), ln.y1(), ln.x2(), ln.y2()], "rot": item.rotation()}
+        if isinstance(item, QGraphicsRectItem):
+            r = item.rect()
+            return {"type": "rect", "rect": [r.x(), r.y(), r.width(), r.height()], "rot": item.rotation()}
+        if isinstance(item, QGraphicsEllipseItem) and item.data(0) == "symbol":
+            r = item.rect()
+            return {"type": "ellipse", "rect": [r.x(), r.y(), r.width(), r.height()], "rot": item.rotation()}
+        if isinstance(item, QGraphicsPathItem):
+            path = item.path()
+            pts = []
+            for i in range(path.elementCount()):
+                el = path.elementAt(i)
+                pts.append([el.x, el.y])
+            return {"type": "path", "points": pts, "rot": item.rotation()}
+        return None
+
+    def _deserialize_item(self, payload: dict, offset: QPointF = QPointF(0, 0)):
+        snap = self.view.snap_point
+        t = payload.get("type")
+        if t == "pin":
+            pos = QPointF(payload["pos"][0], payload["pos"][1]) + offset
+            pin = _PinItem(payload.get("name", self._next_pin_name()), pos, snap, self._pin_moved)
+            self.scene.addItem(pin)
+            self._pin_items.append(pin)
+            return
+        if t == "line":
+            x1, y1, x2, y2 = payload["line"]
+            it = _SnapLine(QLineF(QPointF(x1, y1) + offset, QPointF(x2, y2) + offset), snap)
+            it.setRotation(payload.get("rot", 0))
+            self.scene.addItem(it)
+            return
+        if t == "rect":
+            x, y, w, h = payload["rect"]
+            it = _SnapRect(QRectF(x + offset.x(), y + offset.y(), w, h), snap)
+            it.setRotation(payload.get("rot", 0))
+            self.scene.addItem(it)
+            return
+        if t == "ellipse":
+            x, y, w, h = payload["rect"]
+            it = _SnapEllipse(QRectF(x + offset.x(), y + offset.y(), w, h), snap)
+            it.setRotation(payload.get("rot", 0))
+            self.scene.addItem(it)
+            return
+        if t == "path":
+            pts = payload.get("points", [])
+            if pts:
+                path = QPainterPath(QPointF(pts[0][0], pts[0][1]) + offset)
+                for x, y in pts[1:]:
+                    path.lineTo(x + offset.x(), y + offset.y())
+                it = _SnapPath(path, snap)
+                it.setRotation(payload.get("rot", 0))
+                self.scene.addItem(it)
+            return
+
     def _export_symbol_json(self, json_path: Path):
+        """Convert scene items into our JSON symbol format."""
         symbol_items = []
         bounds = None
         for it in self.scene.items():
@@ -457,11 +696,18 @@ class CustomComponentDialog(QDialog):
         json_path.write_text(json.dumps(data, indent=2))
 
     def _save_component(self):
+        """Save symbol JSON + component JSON into the library tree."""
         kind = self.kind_edit.text().strip()
         display = self.display_edit.text().strip() or kind
         prefix = self.prefix_edit.text().strip() or (kind[:1].upper() if kind else "X")
         category = self.category_edit.text().strip() or "Custom"
         shortcut = self.shortcut_edit.text().strip()
+        spice_type = self.spice_type_edit.text().strip().upper()
+        comp_type = "net" if self.type_combo.currentText().lower().startswith("net") else "component"
+        net_name = self.net_name_edit.text().strip()
+        value_label = "Value"
+        if comp_type == "component" and spice_type.upper() in {"D", "Q", "U", "X"}:
+            value_label = "Part Number"
 
         if not kind:
             QMessageBox.warning(self, "Missing Kind", "Please enter a component kind.")
@@ -473,53 +719,54 @@ class CustomComponentDialog(QDialog):
 
         sym_dir = Path(__file__).resolve().parent.parent / "assets" / "symbols" / "custom"
         sym_dir.mkdir(parents=True, exist_ok=True)
-        sym_path = sym_dir / f"{kind}.json"
+        safe_display = "".join(c for c in display if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_") or kind
+        sym_path = sym_dir / f"{safe_display}.json"
         self._export_symbol_json(sym_path)
 
-        lib_path = Path(__file__).resolve().parent.parent / "assets" / "components" / "custom.json"
-        try:
-            data = json.loads(lib_path.read_text())
-        except Exception:
-            data = {"components": []}
+        root = Path(__file__).resolve().parent.parent / "assets" / "components" / "library"
+        # Allow nested categories using "A/B" or "A / B"
+        raw_parts = [p.strip() for p in category.replace(" / ", "/").split("/") if p.strip()]
+        if not raw_parts:
+            raw_parts = ["Custom"]
+        safe_parts = [
+            "".join(c for c in part if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_") or "Custom"
+            for part in raw_parts
+        ]
+        target_dir = root
+        for part in safe_parts:
+            target_dir = target_dir / part
+        target_dir.mkdir(parents=True, exist_ok=True)
+        comp_path = self._editing_path if self._editing_path and self._editing_path.exists() else (target_dir / f"{safe_display}.json")
 
-        comps = data.get("components", [])
-        comps = [c for c in comps if c.get("kind") != kind]
-        comps.append({
+        data = {
             "kind": kind,
             "display_name": display,
             "category": category,
             "prefix": prefix,
             "shortcut": shortcut,
-            "symbol": f"custom/{kind}.json",
+            "spice_type": spice_type,
+            "value_label": value_label,
+            "type": comp_type,
+            "net_name": net_name,
+            "symbol": f"custom/{safe_display}.json",
             "auto_align_terminals": False,
             "auto_scale_symbol": False,
             "ports": [
                 {"name": p.name, "x": p.scenePos().x(), "y": p.scenePos().y()} for p in self._pin_items
             ],
-        })
-        data["components"] = comps
-        lib_path.write_text(json.dumps(data, indent=2))
+        }
+        comp_path.write_text(json.dumps(data, indent=2))
 
         load_component_library(force_reload=True)
         self.accept()
 
     def load_from_library(self, kind: str) -> bool:
-        root = Path(__file__).resolve().parent.parent
-        custom_path = root / "assets" / "components" / "custom.json"
-        default_path = root / "assets" / "components" / "defaults.json"
-        entry = None
+        comp_path = find_component_file(kind)
+        if comp_path is None or not comp_path.exists():
+            return False
         try:
-            data = json.loads(custom_path.read_text())
-            entry = next((c for c in data.get("components", []) if c.get("kind") == kind), None)
+            entry = json.loads(comp_path.read_text())
         except Exception:
-            entry = None
-        if entry is None:
-            try:
-                data = json.loads(default_path.read_text())
-                entry = next((c for c in data.get("components", []) if c.get("kind") == kind), None)
-            except Exception:
-                entry = None
-        if not entry:
             return False
 
         self._clear_canvas()
@@ -528,7 +775,13 @@ class CustomComponentDialog(QDialog):
         self.prefix_edit.setText(entry.get("prefix", ""))
         self.category_edit.setText(entry.get("category", "Custom"))
         self.shortcut_edit.setText(entry.get("shortcut", ""))
+        self.spice_type_edit.setText(entry.get("spice_type", ""))
+        ctype = str(entry.get("type", "component")).lower()
+        self.type_combo.setCurrentText("Net Label" if ctype == "net" else "Component")
+        self.net_name_edit.setText(entry.get("net_name", ""))
+        self._sync_type_fields()
         self._editing_kind = kind
+        self._editing_path = comp_path
 
         symbol = entry.get("symbol", "")
         if symbol.endswith(".json"):
@@ -566,8 +819,72 @@ class CustomComponentDialog(QDialog):
                 self._pin_items.append(pin)
             except Exception:
                 pass
+        if self._pin_items:
+            self._pin_index = len(self._pin_items) + 1
+            self.pin_index_spin.setValue(self._pin_index)
         self._refresh_pin_table()
         return True
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key_Escape:
+            # Use Esc to return to select mode instead of closing dialog.
+            self._set_tool("select")
+            self._start = None
+            self._active_item = None
+            self._poly_points = []
+            self._poly_item = None
+            self.scene.clearSelection()
+            e.accept()
+            return
+        if e.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+            self._delete_selected()
+            e.accept()
+            return
+        if e.key() == Qt.Key_D and (e.modifiers() & Qt.ControlModifier):
+            self._duplicate_selected()
+            e.accept()
+            return
+        if e.key() == Qt.Key_C and (e.modifiers() & Qt.ControlModifier):
+            self._copy_buffer = []
+            for it in self.scene.selectedItems():
+                payload = self._serialize_item(it)
+                if payload:
+                    self._copy_buffer.append(payload)
+            e.accept()
+            return
+        if e.key() == Qt.Key_V and (e.modifiers() & Qt.ControlModifier):
+            if self._copy_buffer:
+                offset = QPointF(self.view.grid_size * 2, self.view.grid_size * 2)
+                for payload in self._copy_buffer:
+                    self._deserialize_item(payload, offset=offset)
+                self._refresh_pin_table()
+            e.accept()
+            return
+        if e.key() in (Qt.Key_R, Qt.Key_E):
+            self._rotate_selected(90 if e.key() == Qt.Key_R else -90)
+            e.accept()
+            return
+        if e.key() in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
+            step = self.view.grid_size if self.view.snap_on else 1
+            if e.modifiers() & Qt.ShiftModifier:
+                step *= 5
+            dx = dy = 0
+            if e.key() == Qt.Key_Left:
+                dx = -step
+            elif e.key() == Qt.Key_Right:
+                dx = step
+            elif e.key() == Qt.Key_Up:
+                dy = -step
+            elif e.key() == Qt.Key_Down:
+                dy = step
+            for it in self.scene.selectedItems():
+                if it is self._guide_rect:
+                    continue
+                it.setPos(it.pos() + QPointF(dx, dy))
+            self._pin_moved(None)
+            e.accept()
+            return
+        super().keyPressEvent(e)
 
     def eventFilter(self, obj, event):
         # Only handle view mouse events; ignore paint/hide etc.
@@ -583,7 +900,8 @@ class CustomComponentDialog(QDialog):
                     return True
                 if event.button() == Qt.LeftButton:
                     if self._tool == "pin":
-                        pin = _PinItem(f"P{len(self._pin_items) + 1}", pos, self.view.snap_point, self._pin_moved)
+                        pos = self._snap_to_guide_edge(pos)
+                        pin = _PinItem(self._next_pin_name(), pos, self.view.snap_point, self._pin_moved)
                         self.scene.addItem(pin)
                         self._pin_items.append(pin)
                         self._refresh_pin_table()
@@ -616,6 +934,8 @@ class CustomComponentDialog(QDialog):
                 pos = self.view.mapToScene(event.pos())
                 pos = self.view.snap_point(pos)
                 if self._tool in ("line", "rect", "ellipse") and self._start and self._active_item:
+                    if event.modifiers() & Qt.ShiftModifier:
+                        pos = self._constrain_point(self._start, pos, self._tool)
                     if self._tool == "line":
                         self._active_item.setLine(QLineF(self._start, pos))
                     elif self._tool == "rect":
@@ -624,6 +944,9 @@ class CustomComponentDialog(QDialog):
                         self._active_item.setRect(QRectF(self._start, pos).normalized())
                     return True
                 if self._tool == "poly" and self._poly_item and self._poly_points:
+                    if event.modifiers() & Qt.ShiftModifier:
+                        last = self._poly_points[-1]
+                        pos = self._constrain_point(last, pos, "line")
                     path = QPainterPath(self._poly_points[0])
                     for p in self._poly_points[1:]:
                         path.lineTo(p)

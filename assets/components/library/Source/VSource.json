@@ -1,0 +1,23 @@
+{
+  "kind": "VSource",
+  "display_name": "Voltage Source",
+  "category": "Source",
+  "prefix": "V",
+  "spice_type": "V",
+  "shortcut": "V",
+  "symbol": "defaults/voltage_source.json",
+  "auto_align_terminals": true,
+  "auto_scale_symbol": true,
+  "ports": [
+    {
+      "name": "A",
+      "x": -50,
+      "y": 0
+    },
+    {
+      "name": "B",
+      "x": 50,
+      "y": 0
+    }
+  ]
+}

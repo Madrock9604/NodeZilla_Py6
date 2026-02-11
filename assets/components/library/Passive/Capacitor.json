@@ -1,0 +1,24 @@
+{
+  "kind": "Capacitor",
+  "display_name": "Capacitor",
+  "category": "Passive",
+  "prefix": "C",
+  "spice_type": "C",
+  "default_value": "1uF",
+  "shortcut": "C",
+  "symbol": "defaults/capacitor.json",
+  "auto_align_terminals": true,
+  "auto_scale_symbol": true,
+  "ports": [
+    {
+      "name": "A",
+      "x": -50,
+      "y": 0
+    },
+    {
+      "name": "B",
+      "x": 50,
+      "y": 0
+    }
+  ]
+}
