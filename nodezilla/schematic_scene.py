@@ -828,21 +828,36 @@ class SchematicScene(QGraphicsScene):
     def _next_refdes(self, kind: str) -> str:
         p = self._prefix_for_kind(kind)
         if p == 'GND': return 'GND'
-        n = self._refseq.get(kind, 1); return f"{p}{n}"
+        n = self._refseq.get(p, 1)
+        return f"{p}{n}"
 
     def _bump_refseq(self, kind: str):
-        if self._prefix_for_kind(kind) == 'GND': return
-        self._refseq[kind] = self._refseq.get(kind, 1) + 1
+        p = self._prefix_for_kind(kind)
+        if p == 'GND':
+            return
+        self._refseq[p] = self._refseq.get(p, 1) + 1
 
     def _reseed_refseq(self):
         counters: Dict[str, int] = {}
         for it in self.items():
             if isinstance(it, ComponentItem) and it.refdes:
-                key = it.kind
-                digits = ''.join(ch for ch in it.refdes if ch.isdigit())
-                num = int(digits) if digits else 0
-                counters[key] = max(counters.get(key, 0), num)
-        for k, v in counters.items(): self._refseq[k] = v + 1
+                prefix = self._prefix_for_kind(it.kind)
+                if prefix == 'GND':
+                    continue
+                text = it.refdes.strip()
+                if text.startswith(prefix):
+                    digits = text[len(prefix):]
+                else:
+                    # Fallback: use trailing digits if refdes was manually edited.
+                    i = len(text)
+                    while i > 0 and text[i - 1].isdigit():
+                        i -= 1
+                    digits = text[i:]
+                if not digits.isdigit():
+                    continue
+                num = int(digits)
+                counters[prefix] = max(counters.get(prefix, 0), num)
+        self._refseq = {p: n + 1 for p, n in counters.items()}
 
     def _net_point_key(self, p: QPointF) -> Tuple[float, float]:
         return (round(p.x(), 4), round(p.y(), 4))

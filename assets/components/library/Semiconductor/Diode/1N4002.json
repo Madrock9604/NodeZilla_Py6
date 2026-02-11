@@ -1,26 +1,27 @@
 {
-  "kind": "Diode",
+  "kind": "1N4002",
   "display_name": "1N4002",
-  "category": "Semiconductor",
+  "category": "Semiconductor / Diode",
   "prefix": "D",
+  "shortcut": "",
   "spice_type": "D",
-  "default_value": "1N4002",
-  "shortcut": "Shift+D",
-  "symbol": "defaults/diode.json",
-  "show_value": true,
   "value_label": "Part Number",
-  "auto_align_terminals": true,
-  "auto_scale_symbol": true,
+  "default_value": "1N4001",
+  "type": "component",
+  "net_name": "",
+  "symbol": "custom/1N4001.json",
+  "auto_align_terminals": false,
+  "auto_scale_symbol": false,
   "ports": [
     {
-      "name": "A",
-      "x": -50,
-      "y": 0
+      "name": "P1",
+      "x": -50.0,
+      "y": 0.0
     },
     {
-      "name": "B",
-      "x": 50,
-      "y": 0
+      "name": "P2",
+      "x": 40.0,
+      "y": 0.0
     }
   ]
 }
