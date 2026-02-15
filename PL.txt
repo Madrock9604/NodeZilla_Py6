@@ -1,0 +1,31 @@
+cC4 62 63 33e-09
+cC3 60 61 22e-09
+cC2 58 59 15e-09
+cC1 56 57 10e-09
+lL4 54 55 82e-03
+lL3 52 53 68e-03
+lL2 50 51 56e-03
+lL1 48 49 47e-03
+rR9 46 47 15e3
+rR8 45 44 12e3
+rR7 43 42 10e3
+rR6 41 40 8.2e3
+rR5 39 38 6.8e3
+rR4 37 36 5.6e3
+rR3 35 34 4.7e3
+rR2 33 32 3.9e3
+rR1 31 30 2.2e3
+*qU1 29 28 27 26 25 24 23 22 21 20 19 18 17 16 CD4007 *Need to verify SPICE format*
+*dD4 15 14 IN4002 *Need to verify polarity & SPICE format*
+*dD3 13 12 IN4002 *Need to verify polarity & SPICE format*
+*dD2 11 10 IN4002 *Need to verify polarity & SPICE format*
+*dD1 9 8 IN4002 *Need to verify polarity & SPICE format*
+*xU1 0 1 2 3 4 5 6 7 LM358 *Need to verify SPICE format*
+XW1 9 WaveGen
+XW2 10 WaveGen
+*vV1 0 *Still need to verify on SPICE*
+*vV2 1 *Still need to verify on SPICE*
+XO1 3 4 Oscope
+XO2 5 6 Oscope
+*tT1 7 *Need to verify for SPICE*
+*tT2 8 *Need to verify for SPICE*

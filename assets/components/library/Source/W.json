@@ -1,0 +1,21 @@
+{
+  "kind": "W",
+  "display_name": "W",
+  "category": "Source",
+  "prefix": "W",
+  "shortcut": "",
+  "spice_type": "W",
+  "value_label": "Value",
+  "type": "component",
+  "net_name": "",
+  "symbol": "custom/W.json",
+  "auto_align_terminals": false,
+  "auto_scale_symbol": false,
+  "ports": [
+    {
+      "name": "+",
+      "x": 40.0,
+      "y": 0.0
+    }
+  ]
+}

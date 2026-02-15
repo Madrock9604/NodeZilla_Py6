@@ -9,6 +9,7 @@ preferred text serialization.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from typing import Callable, Dict, List, Tuple
 
 from .graphics_items import ComponentItem, WireItem
@@ -185,13 +186,15 @@ class SpiceNetlistFormatter:
         lines: List[str] = [f"* {self._title}"]
         for comp in sorted(netlist.components, key=lambda c: c.refdes or c.kind):
             refdes = self._name_resolver(comp)
+            prefix = self._type_resolver(comp)
             if getattr(comp, "pins", None):
                 nodes = [self._normalize_node_name(p.net) for p in comp.pins]
             else:
                 # Fallback to fixed port order if pin data is missing.
                 nodes = [self._floating_node for _ in self._port_order]
-            tokens = [self._type_resolver(comp), refdes, *nodes]
+            tokens = [f"{prefix}{refdes}", *nodes]
             value = self._value_resolver(comp).strip()
+            value = self._normalize_rlc_value(prefix, value)
             if value:
                 tokens.append(value)
             part = self._part_resolver(comp).strip()
@@ -227,6 +230,60 @@ class SpiceNetlistFormatter:
     @staticmethod
     def _default_component_part(component: Component) -> str:
         return ""
+
+    @staticmethod
+    def _normalize_rlc_value(prefix: str, value: str) -> str:
+        """Convert engineering suffixes to scientific notation for R/C/L only.
+
+        Examples:
+        - 1k   -> 1e3
+        - 4.7uF -> 4.7e-6
+        - 1mH -> 1e-3
+        """
+        if not value:
+            return value
+        if (prefix or "").strip().upper() not in {"R", "C", "L"}:
+            return value
+
+        txt = value.strip().replace(" ", "")
+        # Keep explicit scientific notation as-is.
+        if "e" in txt.lower():
+            return txt
+
+        m = re.fullmatch(r"([+-]?(?:\d+(?:\.\d+)?|\.\d+))([a-zA-Z]+)?", txt)
+        if not m:
+            return value
+
+        number = m.group(1)
+        suffix = (m.group(2) or "").strip()
+        if not suffix:
+            return number
+
+        multipliers = {
+            "T": 12,
+            "G": 9,
+            "MEG": 6,
+            "K": 3,
+            "M": -3,
+            "U": -6,
+            "N": -9,
+            "P": -12,
+            "F": -15,
+        }
+
+        suffix_up = suffix.upper()
+        # Accept common unit tails, e.g., "uF", "mH", "kOhm".
+        eng = ""
+        if suffix_up.startswith("MEG"):
+            eng = "MEG"
+        elif suffix_up and suffix_up[0] in {"T", "G", "K", "M", "U", "N", "P", "F"}:
+            eng = suffix_up[0]
+        if not eng:
+            # Unknown suffix; keep original value untouched.
+            return value
+
+        exp = multipliers[eng]
+        return f"{number}e{exp}"
 
 
 class _UnionFind:
