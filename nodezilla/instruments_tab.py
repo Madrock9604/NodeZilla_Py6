@@ -487,6 +487,19 @@ class WavegenPanel(QWidget):
             self._set_running(False)
             self.state_label.setText("State: Disconnected")
 
+    def shutdown(self):
+        """Stop timers and running wavegen on app shutdown."""
+        try:
+            self._reconfig_timer.stop()
+        except Exception:
+            pass
+        if self._running:
+            try:
+                self.backend.stop_tool("wavegen")
+            except Exception:
+                pass
+        self._set_running(False)
+
     def _save_profile(self, *_args):
         base = self._profile_key
         self._settings.setValue(f"{base}/ch1_enable", bool(self.ch1_enable.isChecked()))
@@ -906,6 +919,23 @@ class ScopePanel(QWidget):
             self.timer.stop()
             self._set_running(False)
             self.state_label.setText("State: Disconnected")
+
+    def shutdown(self):
+        """Stop polling/reconfigure timers and scope acquisition on app shutdown."""
+        try:
+            self.timer.stop()
+        except Exception:
+            pass
+        try:
+            self._reconfig_timer.stop()
+        except Exception:
+            pass
+        if self._running:
+            try:
+                self.backend.stop_tool("scope")
+            except Exception:
+                pass
+        self._set_running(False)
 
     def _update_span_label(self):
         fs, _, _, _, _, _, _, time_div_s = self._scope_params()
@@ -1398,6 +1428,17 @@ class SuppliesPanel(QWidget):
         if self.backend.connected_device() is not None:
             self._refresh_status()
 
+    def shutdown(self):
+        """Stop status/config timers before backend teardown."""
+        try:
+            self.poll_timer.stop()
+        except Exception:
+            pass
+        try:
+            self.recfg_timer.stop()
+        except Exception:
+            pass
+
     def _save_profile(self, *_args):
         base = self._profile_key
         self._settings.setValue(f"{base}/master", bool(self.master_enable.isChecked()))
@@ -1665,6 +1706,13 @@ class StaticIOPanel(QWidget):
         self._update_runtime_line()
         self._refresh_mask()
 
+    def shutdown(self):
+        """Stop polling before backend teardown."""
+        try:
+            self.poll.stop()
+        except Exception:
+            pass
+
 
 class InstrumentsTab(QWidget):
     """Instruments workspace for AD tool orchestration and data capture."""
@@ -1687,6 +1735,7 @@ class InstrumentsTab(QWidget):
     ):
         super().__init__()
         self.backend = backend or make_backend()
+        self._shutting_down = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
@@ -1891,6 +1940,8 @@ class InstrumentsTab(QWidget):
             sub.close()
 
     def _on_connection_changed(self, connected: bool, message: str):
+        if self._shutting_down:
+            return
         self.status.setText(f"Hardware: {message}")
         self.connect_btn.setEnabled(not connected)
         self.disconnect_btn.setEnabled(connected)
@@ -1911,3 +1962,41 @@ class InstrumentsTab(QWidget):
         w = sub.widget() if hasattr(sub, "widget") else None
         if w is not None and hasattr(w, "sync_from_backend"):
             w.sync_from_backend()
+
+    def shutdown(self):
+        """Gracefully stop instrument activity and disconnect backend."""
+        if self._shutting_down:
+            return
+        self._shutting_down = True
+        try:
+            self.backend.connection_changed.disconnect(self._on_connection_changed)
+        except Exception:
+            pass
+
+        # Stop all open panel timers/tool activity before touching backend.
+        for key, sub in list(self._subwindows.items()):
+            try:
+                w = sub.widget() if hasattr(sub, "widget") else None
+                if w is not None and hasattr(w, "shutdown"):
+                    w.shutdown()
+            except Exception:
+                pass
+
+        # Best-effort stop for tool engines (safe if already stopped).
+        for tool_key in ("scope", "wavegen", "supplies"):
+            try:
+                self.backend.stop_tool(tool_key)
+            except Exception:
+                pass
+
+        # Finally close hardware session.
+        try:
+            if self.backend.connected_device() is not None:
+                self.backend.disconnect_device()
+        except Exception:
+            pass
+
+        try:
+            self.workspace.closeAllSubWindows()
+        except Exception:
+            pass

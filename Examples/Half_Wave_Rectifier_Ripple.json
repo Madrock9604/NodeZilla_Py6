@@ -1,0 +1,515 @@
+{
+  "components": [
+    {
+      "kind": "Capacitor",
+      "pos": [
+        -1020.0,
+        -200.0
+      ],
+      "rotation": 90.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "C1",
+      "value": "33nF",
+      "labels": {
+        "refdes_pos": [
+          -38.349723367623085,
+          -23.300858334396935
+        ],
+        "value_pos": [
+          -7.898131341042102,
+          -21.37561122860086
+        ],
+        "refdes_manual": true,
+        "value_manual": true
+      }
+    },
+    {
+      "kind": "Oscope",
+      "pos": [
+        -1400.0,
+        -140.0
+      ],
+      "rotation": 270.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": -1.0
+      },
+      "refdes": "O2",
+      "value": "Oscope",
+      "labels": {
+        "refdes_pos": [
+          14.21875,
+          -34.00109865963525
+        ],
+        "value_pos": [
+          -44.0546875,
+          -32.393310993920736
+        ],
+        "refdes_manual": true,
+        "value_manual": true
+      }
+    },
+    {
+      "kind": "Oscope",
+      "pos": [
+        -780.0,
+        -200.0
+      ],
+      "rotation": 90.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "O1",
+      "value": "Oscope",
+      "labels": {
+        "refdes_pos": [
+          -11.875,
+          -64.00109865963525
+        ],
+        "value_pos": [
+          -68.0546875,
+          17.606689006079264
+        ],
+        "refdes_manual": false,
+        "value_manual": true
+      }
+    },
+    {
+      "kind": "WaveGen",
+      "pos": [
+        -1400.0,
+        -300.0
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "W1",
+      "value": "WaveGen",
+      "labels": {
+        "refdes_pos": [
+          -13.1484375,
+          -55.01406799531067
+        ],
+        "value_pos": [
+          -32.34375,
+          41.01406799531067
+        ],
+        "refdes_manual": false,
+        "value_manual": false
+      }
+    },
+    {
+      "kind": "Ground",
+      "pos": [
+        -1100.0,
+        -20.0
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "GND",
+      "value": "GND",
+      "labels": {
+        "refdes_pos": [
+          -18.15625,
+          -43.625
+        ],
+        "value_pos": [
+          -11.0,
+          32.0
+        ],
+        "refdes_manual": false,
+        "value_manual": true
+      }
+    },
+    {
+      "kind": "Resistor",
+      "pos": [
+        -1100.0,
+        -200.0
+      ],
+      "rotation": 90.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "R1",
+      "value": "15k",
+      "labels": {
+        "refdes_pos": [
+          -33.4698215563526,
+          42.52573260286931
+        ],
+        "value_pos": [
+          0.08348713902216787,
+          52.05208079159888
+        ],
+        "refdes_manual": true,
+        "value_manual": true
+      }
+    },
+    {
+      "kind": "1N4002",
+      "pos": [
+        -1200.0,
+        -300.0
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "D1",
+      "value": "1N4002",
+      "labels": {
+        "refdes_pos": [
+          -11.578125,
+          -39.386750490563074
+        ],
+        "value_pos": [
+          -27.59375,
+          25.386750490563074
+        ],
+        "refdes_manual": false,
+        "value_manual": false
+      }
+    }
+  ],
+  "texts": [
+    {
+      "text": "Lets see how flat can\nyou get the initial signal",
+      "pos": [
+        -689.0220565167452,
+        -110.1121293413061
+      ],
+      "style": {
+        "family": ".AppleSystemUIFont",
+        "point_size": 13,
+        "bold": false,
+        "italic": false,
+        "color": "#ebebeb",
+        "custom_color": ""
+      }
+    },
+    {
+      "text": "Try different values for:\nResistance\nCapacitance\nFrequency",
+      "pos": [
+        -854.3229148511422,
+        -130.7512224572019
+      ],
+      "style": {
+        "family": ".AppleSystemUIFont",
+        "point_size": 13,
+        "bold": false,
+        "italic": false,
+        "color": "#ebebeb",
+        "custom_color": ""
+      }
+    },
+    {
+      "text": "The capacitor\ntries to maintain\nthe voltage steady\nso it creates an\neffect called ripple\nthis looks almost\nlike a stright line!",
+      "pos": [
+        -1006.8419108676233,
+        -173.23284202658095
+      ],
+      "style": {
+        "family": ".AppleSystemUIFont",
+        "point_size": 13,
+        "bold": false,
+        "italic": false,
+        "color": "#ebebeb",
+        "custom_color": ""
+      }
+    },
+    {
+      "text": "The resistor in combo\nwith the capacitor delay\nthe discharging time\nthis means that the bigger\nare both the more time\nthey retain charge!\nNote: It still very little time!",
+      "pos": [
+        -1289.246315199356,
+        -165.37561122860092
+      ],
+      "style": {
+        "family": ".AppleSystemUIFont",
+        "point_size": 13,
+        "bold": false,
+        "italic": false,
+        "color": "#ebebeb",
+        "custom_color": ""
+      }
+    },
+    {
+      "text": "The key component here\nis the Diode (D1)! It acts\nas a check valve but for\nelectricity!!! What would\nhappen if you flip the\nDiode?",
+      "pos": [
+        -1287.5255322589867,
+        -445.8340537935596
+      ],
+      "style": {
+        "family": ".AppleSystemUIFont",
+        "point_size": 13,
+        "bold": false,
+        "italic": false,
+        "color": "#ebebeb",
+        "custom_color": ""
+      }
+    },
+    {
+      "text": "This is a Half Wave Rectifier with a ripple capacitor. It recieves its name because it transforms a signal to only its positive values and all negatives values are ignored\nand the capacitor tries to flat the signal so its a straight line!",
+      "pos": [
+        -1561.8649319111416,
+        -567.5587999489499
+      ],
+      "style": {
+        "family": ".AppleSystemUIFont",
+        "point_size": 13,
+        "bold": false,
+        "italic": false,
+        "color": "#ebebeb",
+        "custom_color": ""
+      }
+    }
+  ],
+  "wires": [
+    {
+      "points": [
+        {
+          "x": -820.0,
+          "y": -180.0
+        },
+        {
+          "x": -880.0,
+          "y": -180.0
+        },
+        {
+          "x": -880.0,
+          "y": -40.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        2,
+        "-"
+      ],
+      "b_point": {
+        "x": -1020.0,
+        "y": -40.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -820.0,
+          "y": -220.0
+        },
+        {
+          "x": -880.0,
+          "y": -220.0
+        },
+        {
+          "x": -880.0,
+          "y": -300.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        2,
+        "+"
+      ],
+      "b_point": {
+        "x": -1020.0,
+        "y": -300.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1020.0,
+          "y": -160.0
+        },
+        {
+          "x": -1020.0,
+          "y": -40.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        0,
+        "B"
+      ],
+      "b": [
+        4,
+        "A"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -1020.0,
+          "y": -240.0
+        },
+        {
+          "x": -1020.0,
+          "y": -300.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        0,
+        "A"
+      ],
+      "b_point": {
+        "x": -1100.0,
+        "y": -300.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1360.0,
+          "y": -160.0
+        },
+        {
+          "x": -1320.0,
+          "y": -160.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        1,
+        "+"
+      ],
+      "b_point": {
+        "x": -1320.0,
+        "y": -300.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1360.0,
+          "y": -120.0
+        },
+        {
+          "x": -1360.0,
+          "y": -40.0
+        },
+        {
+          "x": -1100.0,
+          "y": -40.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        1,
+        "-"
+      ],
+      "b": [
+        4,
+        "A"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -1100.0,
+          "y": -160.0
+        },
+        {
+          "x": -1100.0,
+          "y": -40.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        5,
+        "B"
+      ],
+      "b": [
+        4,
+        "A"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -1160.0,
+          "y": -300.0
+        },
+        {
+          "x": -1100.0,
+          "y": -300.0
+        },
+        {
+          "x": -1100.0,
+          "y": -240.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        6,
+        "P2"
+      ],
+      "b": [
+        5,
+        "A"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -1360.0,
+          "y": -300.0
+        },
+        {
+          "x": -1320.0,
+          "y": -300.0
+        },
+        {
+          "x": -1240.0,
+          "y": -300.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        3,
+        "+"
+      ],
+      "b": [
+        6,
+        "P1"
+      ]
+    }
+  ],
+  "settings": {
+    "grid_on": true,
+    "grid_size": 20,
+    "grid_style": "dots",
+    "snap_on": true,
+    "wire_junctions": [
+      {
+        "x": -1320.0,
+        "y": -300.0
+      },
+      {
+        "x": -1100.0,
+        "y": -300.0
+      },
+      {
+        "x": -1020.0,
+        "y": -300.0
+      },
+      {
+        "x": -1020.0,
+        "y": -40.0
+      }
+    ],
+    "net_names": []
+  },
+  "_format": 2
+}

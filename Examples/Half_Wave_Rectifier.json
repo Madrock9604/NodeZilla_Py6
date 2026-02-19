@@ -1,0 +1,390 @@
+{
+  "components": [
+    {
+      "kind": "Oscope",
+      "pos": [
+        -1400.0,
+        -140.0
+      ],
+      "rotation": 270.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": -1.0
+      },
+      "refdes": "O2",
+      "value": "Oscope",
+      "labels": {
+        "refdes_pos": [
+          14.21875,
+          -34.00109865963525
+        ],
+        "value_pos": [
+          -44.0546875,
+          -32.393310993920736
+        ],
+        "refdes_manual": true,
+        "value_manual": true
+      }
+    },
+    {
+      "kind": "Oscope",
+      "pos": [
+        -880.0,
+        -200.0
+      ],
+      "rotation": 90.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "O1",
+      "value": "Oscope",
+      "labels": {
+        "refdes_pos": [
+          -11.875,
+          -64.00109865963525
+        ],
+        "value_pos": [
+          -68.0546875,
+          17.606689006079264
+        ],
+        "refdes_manual": false,
+        "value_manual": true
+      }
+    },
+    {
+      "kind": "WaveGen",
+      "pos": [
+        -1400.0,
+        -300.0
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "W1",
+      "value": "WaveGen",
+      "labels": {
+        "refdes_pos": [
+          -13.1484375,
+          -55.01406799531067
+        ],
+        "value_pos": [
+          -32.34375,
+          41.01406799531067
+        ],
+        "refdes_manual": false,
+        "value_manual": false
+      }
+    },
+    {
+      "kind": "Ground",
+      "pos": [
+        -1100.0,
+        -20.0
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "GND",
+      "value": "GND",
+      "labels": {
+        "refdes_pos": [
+          -18.15625,
+          -43.625
+        ],
+        "value_pos": [
+          -11.0,
+          32.0
+        ],
+        "refdes_manual": false,
+        "value_manual": true
+      }
+    },
+    {
+      "kind": "Resistor",
+      "pos": [
+        -1100.0,
+        -200.0
+      ],
+      "rotation": 90.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "R1",
+      "value": "2.2k",
+      "labels": {
+        "refdes_pos": [
+          -33.4698215563526,
+          42.52573260286931
+        ],
+        "value_pos": [
+          0.08348713902216787,
+          52.05208079159888
+        ],
+        "refdes_manual": true,
+        "value_manual": true
+      }
+    },
+    {
+      "kind": "1N4002",
+      "pos": [
+        -1200.0,
+        -300.0
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "D1",
+      "value": "1N4002",
+      "labels": {
+        "refdes_pos": [
+          -11.578125,
+          -39.386750490563074
+        ],
+        "value_pos": [
+          -27.59375,
+          25.386750490563074
+        ],
+        "refdes_manual": false,
+        "value_manual": false
+      }
+    }
+  ],
+  "texts": [
+    {
+      "text": "This resistor acts\nas a load, meaning\nwe place it so we\ncan read the output\nas the voltage across\nthe resistor. What \nwould happen if you\nincrease the resistance?",
+      "pos": [
+        -1081.5410525332259,
+        -276.5778133944681
+      ],
+      "style": {
+        "family": ".AppleSystemUIFont",
+        "point_size": 13,
+        "bold": false,
+        "italic": false,
+        "color": "#ebebeb",
+        "custom_color": ""
+      }
+    },
+    {
+      "text": "The key component here\nis the Diode (D1)! It acts\nas a check valve but for\nelectricity!!! What would\nhappen if you flip the\nDiode?",
+      "pos": [
+        -1287.5255322589867,
+        -445.8340537935596
+      ],
+      "style": {
+        "family": ".AppleSystemUIFont",
+        "point_size": 13,
+        "bold": false,
+        "italic": false,
+        "color": "#ebebeb",
+        "custom_color": ""
+      }
+    },
+    {
+      "text": "This is a Half Wave Rectifier. It recieves its name because it transforms a signal to only its positive values and all negatives values are ignored",
+      "pos": [
+        -1437.8808674273587,
+        -573.310637992012
+      ],
+      "style": {
+        "family": ".AppleSystemUIFont",
+        "point_size": 13,
+        "bold": false,
+        "italic": false,
+        "color": "#ebebeb",
+        "custom_color": ""
+      }
+    }
+  ],
+  "wires": [
+    {
+      "points": [
+        {
+          "x": -1360.0,
+          "y": -160.0
+        },
+        {
+          "x": -1320.0,
+          "y": -160.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        0,
+        "+"
+      ],
+      "b_point": {
+        "x": -1320.0,
+        "y": -300.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -920.0,
+          "y": -220.0
+        },
+        {
+          "x": -920.0,
+          "y": -300.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        1,
+        "+"
+      ],
+      "b_point": {
+        "x": -1100.0,
+        "y": -300.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -920.0,
+          "y": -180.0
+        },
+        {
+          "x": -920.0,
+          "y": -40.0
+        },
+        {
+          "x": -1100.0,
+          "y": -40.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        1,
+        "-"
+      ],
+      "b": [
+        3,
+        "A"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -1360.0,
+          "y": -120.0
+        },
+        {
+          "x": -1360.0,
+          "y": -40.0
+        },
+        {
+          "x": -1100.0,
+          "y": -40.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        0,
+        "-"
+      ],
+      "b": [
+        3,
+        "A"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -1100.0,
+          "y": -160.0
+        },
+        {
+          "x": -1100.0,
+          "y": -40.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        4,
+        "B"
+      ],
+      "b": [
+        3,
+        "A"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -1160.0,
+          "y": -300.0
+        },
+        {
+          "x": -1100.0,
+          "y": -300.0
+        },
+        {
+          "x": -1100.0,
+          "y": -240.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        5,
+        "P2"
+      ],
+      "b": [
+        4,
+        "A"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -1360.0,
+          "y": -300.0
+        },
+        {
+          "x": -1320.0,
+          "y": -300.0
+        },
+        {
+          "x": -1240.0,
+          "y": -300.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        2,
+        "+"
+      ],
+      "b": [
+        5,
+        "P1"
+      ]
+    }
+  ],
+  "settings": {
+    "grid_on": true,
+    "grid_size": 20,
+    "grid_style": "dots",
+    "snap_on": true,
+    "wire_junctions": [
+      {
+        "x": -1320.0,
+        "y": -300.0
+      },
+      {
+        "x": -1100.0,
+        "y": -300.0
+      }
+    ],
+    "net_names": []
+  },
+  "_format": 2
+}

@@ -1,16 +1,84 @@
 import os
+import sys
+from pathlib import Path
+
 programming_delay = 10
+
+
+def _pl_read_candidates() -> list[Path]:
+    """Return candidate locations for PL.txt in priority order."""
+    out: list[Path] = []
+    env_path = os.environ.get("NODEZILLA_PL_PATH", "").strip()
+    if env_path:
+        out.append(Path(env_path).expanduser())
+    # Typical dev run location.
+    out.append(Path.cwd() / "PL.txt")
+    # Repo root relative to nodezilla/Program.py.
+    out.append(Path(__file__).resolve().parent.parent / "PL.txt")
+    # PyInstaller bundle extraction path.
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        out.append(Path(meipass) / "PL.txt")
+    # macOS .app run paths.
+    exe = Path(sys.executable).resolve()
+    out.append(exe.parent / "PL.txt")
+    out.append(exe.parent.parent / "Resources" / "PL.txt")
+    out.append(exe.parent.parent.parent / "PL.txt")
+    # User-writable fallback.
+    out.append(Path.home() / "Library" / "Application Support" / "NodeZilla" / "PL.txt")
+    # De-duplicate while preserving order.
+    uniq = []
+    seen = set()
+    for p in out:
+        s = str(p)
+        if s in seen:
+            continue
+        seen.add(s)
+        uniq.append(p)
+    return uniq
+
+
+def _resolve_pl_for_read() -> Path | None:
+    for p in _pl_read_candidates():
+        try:
+            if p.exists() and p.is_file():
+                return p
+        except Exception:
+            continue
+    return None
+
+
+def _resolve_pl_for_write() -> Path:
+    env_path = os.environ.get("NODEZILLA_PL_PATH", "").strip()
+    if env_path:
+        p = Path(env_path).expanduser()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return p
+    p = Path.home() / "Library" / "Application Support" / "NodeZilla" / "PL.txt"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 class CreateComponentDataSet:
     def MakeDataSet():
         """This might need to be updated to account several scenarios"""
         #Line ignore prefixes
         ignore_prefix = ['*', ".", "v", "I", "R", "\n"]
+        ComponentDataSet = []
         
         #Open Portlist file
+        pl_path = _resolve_pl_for_read()
+        if pl_path is None:
+            tried = "\n".join(str(p) for p in _pl_read_candidates())
+            print(
+                "Error 02: Portlist not found. Expected PL.txt in one of:\n"
+                f"{tried}\n"
+                "Tip: set NODEZILLA_PL_PATH to override."
+            )
+            return ComponentDataSet
         try:
-            with open("PL.txt", 'r') as PL:
+            with open(pl_path, 'r') as PL:
                 Componentid = 0
-                ComponentDataSet = []
                 for line in PL:
                     if not line.startswith(tuple(ignore_prefix)):
                         Component_Attributes = line.split(" ")
@@ -19,7 +87,7 @@ class CreateComponentDataSet:
                         pass
                 pass
         except FileNotFoundError:
-            print("Error 02: Portlist not fount. Please check if PL.txt exist in the root folder")
+            print(f"Error 02: Portlist not found: {pl_path}")
         return ComponentDataSet
 
 class ComponentSerach:
@@ -195,7 +263,8 @@ class CreatePortlist:
 
     def __init__(self, ResourceFiles):
         #Create a new empty PL file
-        with open("PL.txt", 'w') as PortListFile:
+        pl_path = _resolve_pl_for_write()
+        with open(pl_path, 'w') as PortListFile:
             #Number to keep track the number of board being checked
             BoardNumber = 1
             #For each file requested in the set up tab

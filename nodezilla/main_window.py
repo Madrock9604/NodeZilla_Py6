@@ -1090,7 +1090,7 @@ class MainWindow(QMainWindow):
         self.runtime_spice_netlist_text = netlist_text
 
     def _build_runtime_netlist(self):
-        """Generate SPICE netlist text and write a temp file in project root.
+        """Generate SPICE netlist text and write a temp file in a writable user temp dir.
 
         Stores outputs on:
         - self.runtime_spice_netlist_text
@@ -1108,7 +1108,12 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to build netlist: {e}")
             return
 
-        root_dir = Path.cwd()
+        # App bundles may run with a read-only cwd; use a user-writable runtime temp dir.
+        root_dir = Path(tempfile.gettempdir()) / "nodezilla_runtime"
+        try:
+            root_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            root_dir = Path(tempfile.gettempdir())
         try:
             fd, tmp_path = tempfile.mkstemp(
                 prefix="nodezilla_spice_",
@@ -1123,12 +1128,15 @@ class MainWindow(QMainWindow):
 
         self.runtime_spice_netlist_text = netlist_text
         self.runtime_spice_netlist_path = str(tmp_path)
-        
-        Feedback_message = ""
-        ComponentDataSet = P.CreateComponentDataSet.MakeDataSet()
-        P.ComponentSerach(ComponentDataSet, tmp_path)
-        Used_Components = P.ComponentSerach.GetComponentsUsed(ComponentDataSet)
-        P.CirToScript(Used_Components, backend)
+
+        try:
+            ComponentDataSet = P.CreateComponentDataSet.MakeDataSet()
+            P.ComponentSerach(ComponentDataSet, tmp_path)
+            Used_Components = P.ComponentSerach.GetComponentsUsed(ComponentDataSet)
+            P.CirToScript(Used_Components, backend)
+        except Exception as e:
+            QMessageBox.critical(self, "Runtime script error", f"Failed while processing runtime script: {e}")
+            return
         self.statusBar().showMessage(
             f"Runtime SPICE netlist ready: {self.runtime_spice_netlist_path}",
             5000,
@@ -1198,7 +1206,15 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "Error", f"Failed to save: {e}")
 
     def closeEvent(self, event):
-        """Delete runtime netlist temp file on app close, then continue shutdown."""
+        """Graceful app shutdown: stop instruments, disconnect hardware, clean temp files."""
+        try:
+            if hasattr(self, "instruments_tab") and self.instruments_tab is not None:
+                if hasattr(self.instruments_tab, "shutdown"):
+                    self.instruments_tab.shutdown()
+        except Exception:
+            # Best-effort shutdown; never block close.
+            pass
+
         tmp_path = (self.runtime_spice_netlist_path or "").strip()
         if tmp_path:
             try:
