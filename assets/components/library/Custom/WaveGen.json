@@ -1,11 +1,13 @@
 {
   "kind": "WaveGen",
   "display_name": "WaveGen",
-  "category": "Source",
+  "category": "Custom",
   "prefix": "W",
   "shortcut": "",
   "spice_type": "X",
   "value_label": "Part Number",
+  "show_value": true,
+  "default_value": "WaveGen",
   "type": "component",
   "net_name": "",
   "symbol": "custom/WaveGen.json",
@@ -13,8 +15,8 @@
   "auto_scale_symbol": false,
   "ports": [
     {
-      "name": "P1",
-      "x": 50.0,
+      "name": "+",
+      "x": 49.70691676436108,
       "y": 0.0
     }
   ]

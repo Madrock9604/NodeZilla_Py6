@@ -19,6 +19,15 @@ from .component_library import load_component_library, find_component_file
 from .graphics_items import COMP_WIDTH, COMP_HEIGHT
 
 
+# Custom symbol normalization target.
+GUIDE_WIDTH = 100.0
+GUIDE_HEIGHT = 100.0
+GUIDE_PADDING = 2.0
+# Keep the editor workspace larger than the guide box for easier drawing.
+EDITOR_SCENE_WIDTH = 520.0
+EDITOR_SCENE_HEIGHT = 360.0
+
+
 @dataclass
 class _PinData:
     name: str
@@ -196,11 +205,16 @@ class CustomComponentDialog(QDialog):
         self.view = _GridView()
         self.scene = QGraphicsScene()
         self.view.setScene(self.scene)
-        self.scene.setSceneRect(-COMP_WIDTH / 2, -COMP_HEIGHT / 2, COMP_WIDTH, COMP_HEIGHT)
+        self.scene.setSceneRect(
+            -EDITOR_SCENE_WIDTH / 2,
+            -EDITOR_SCENE_HEIGHT / 2,
+            EDITOR_SCENE_WIDTH,
+            EDITOR_SCENE_HEIGHT,
+        )
         self.view.setRenderHints(self.view.renderHints())
 
         self._guide_rect = self.scene.addRect(
-            -COMP_WIDTH / 2, -COMP_HEIGHT / 2, COMP_WIDTH, COMP_HEIGHT,
+            -GUIDE_WIDTH / 2, -GUIDE_HEIGHT / 2, GUIDE_WIDTH, GUIDE_HEIGHT,
             QPen(Qt.darkGray, 1, Qt.DotLine)
         )
         self._guide_rect.setData(0, "guide")
@@ -661,7 +675,11 @@ class CustomComponentDialog(QDialog):
             return
 
     def _export_symbol_json(self, json_path: Path):
-        """Convert scene items into our JSON symbol format."""
+        """Convert scene items into normalized JSON symbol format.
+
+        Returns transform used for normalization so pins can be exported in the
+        same coordinate space.
+        """
         symbol_items = []
         bounds = None
         for it in self.scene.items():
@@ -672,40 +690,61 @@ class CustomComponentDialog(QDialog):
                 r = it.mapToScene(it.boundingRect()).boundingRect()
                 bounds = r if bounds is None else bounds.united(r)
         if bounds is None:
-            bounds = QRectF(-COMP_WIDTH / 2, -COMP_HEIGHT / 2, COMP_WIDTH, COMP_HEIGHT)
-        bounds = bounds.adjusted(-6, -6, 6, 6)
+            bounds = QRectF(-GUIDE_WIDTH / 2, -GUIDE_HEIGHT / 2, GUIDE_WIDTH, GUIDE_HEIGHT)
+        bounds = bounds.adjusted(-GUIDE_PADDING, -GUIDE_PADDING, GUIDE_PADDING, GUIDE_PADDING)
+
+        # Normalize all saved geometry into the guide box so custom symbols
+        # keep consistent size when instantiated.
+        target = self._guide_rect.rect().adjusted(
+            GUIDE_PADDING,
+            GUIDE_PADDING,
+            -GUIDE_PADDING,
+            -GUIDE_PADDING,
+        )
+        if bounds.width() > 1e-9 and bounds.height() > 1e-9:
+            sx = target.width() / bounds.width()
+            sy = target.height() / bounds.height()
+            scale = min(sx, sy)
+        else:
+            scale = 1.0
+        tx = target.center().x() - bounds.center().x() * scale
+        ty = target.center().y() - bounds.center().y() * scale
+
+        def _norm_point(p: QPointF) -> QPointF:
+            return QPointF(p.x() * scale + tx, p.y() * scale + ty)
 
         shapes = []
         for it in symbol_items:
             tr = it.sceneTransform()
             if isinstance(it, QGraphicsLineItem):
                 ln = it.line()
-                a = tr.map(QPointF(ln.x1(), ln.y1()))
-                b = tr.map(QPointF(ln.x2(), ln.y2()))
+                a = _norm_point(tr.map(QPointF(ln.x1(), ln.y1())))
+                b = _norm_point(tr.map(QPointF(ln.x2(), ln.y2())))
                 shapes.append({"type": "line", "x1": a.x(), "y1": a.y(), "x2": b.x(), "y2": b.y()})
             elif isinstance(it, QGraphicsRectItem):
                 r = it.rect()
-                tl = tr.map(QPointF(r.left(), r.top()))
-                br = tr.map(QPointF(r.right(), r.bottom()))
+                tl = _norm_point(tr.map(QPointF(r.left(), r.top())))
+                br = _norm_point(tr.map(QPointF(r.right(), r.bottom())))
                 shapes.append({"type": "rect", "x": tl.x(), "y": tl.y(), "w": br.x() - tl.x(), "h": br.y() - tl.y()})
             elif isinstance(it, QGraphicsEllipseItem):
                 r = it.rect()
-                tl = tr.map(QPointF(r.left(), r.top()))
-                br = tr.map(QPointF(r.right(), r.bottom()))
+                tl = _norm_point(tr.map(QPointF(r.left(), r.top())))
+                br = _norm_point(tr.map(QPointF(r.right(), r.bottom())))
                 shapes.append({"type": "ellipse", "x": tl.x(), "y": tl.y(), "w": br.x() - tl.x(), "h": br.y() - tl.y()})
             elif isinstance(it, QGraphicsPathItem):
                 pts = []
                 path = it.path()
                 for i in range(path.elementCount()):
                     el = path.elementAt(i)
-                    pts.append(tr.map(QPointF(el.x, el.y)))
+                    pts.append(_norm_point(tr.map(QPointF(el.x, el.y))))
                 shapes.append({"type": "polyline", "points": [[p.x(), p.y()] for p in pts]})
 
         data = {
-            "bounds": [bounds.left(), bounds.top(), bounds.width(), bounds.height()],
+            "bounds": [target.left(), target.top(), target.width(), target.height()],
             "shapes": shapes,
         }
         json_path.write_text(json.dumps(data, indent=2))
+        return {"scale": float(scale), "tx": float(tx), "ty": float(ty)}
 
     def _save_component(self):
         """Save symbol JSON + component JSON into the library tree."""
@@ -717,9 +756,19 @@ class CustomComponentDialog(QDialog):
         spice_type = self.spice_type_edit.text().strip().upper()
         comp_type = "net" if self.type_combo.currentText().lower().startswith("net") else "component"
         net_name = self.net_name_edit.text().strip()
-        value_label = "Value"
-        if comp_type == "component" and spice_type.upper() in {"D", "Q", "U", "X"}:
-            value_label = "Part Number"
+        st = spice_type.upper()
+        is_part_number_component = comp_type == "component" and st not in {"R", "C", "L"}
+        value_label = "Part Number" if is_part_number_component else "Value"
+        default_value = ""
+        if comp_type == "component":
+            if st == "R":
+                default_value = "1k"
+            elif st == "C":
+                default_value = "1uF"
+            elif st == "L":
+                default_value = "1mH"
+            elif is_part_number_component:
+                default_value = display
 
         if not kind:
             QMessageBox.warning(self, "Missing Kind", "Please enter a component kind.")
@@ -729,11 +778,35 @@ class CustomComponentDialog(QDialog):
             QMessageBox.warning(self, "Missing Pins", "Please place at least one pin.")
             return
 
+        if shortcut:
+            lib = load_component_library(force_reload=True)
+            editing_kind = self.kind_edit.text().strip()
+            for comp in lib.sorted_components():
+                if not getattr(comp, "shortcut", ""):
+                    continue
+                if str(comp.shortcut).strip().lower() != shortcut.lower():
+                    continue
+                if editing_kind and comp.kind == editing_kind:
+                    continue
+                QMessageBox.warning(
+                    self,
+                    "Shortcut In Use",
+                    f'Shortcut "{shortcut}" is already assigned to "{comp.display_name}". '
+                    "Please choose a different shortcut.",
+                )
+                return
+
         sym_dir = Path(__file__).resolve().parent.parent / "assets" / "symbols" / "custom"
         sym_dir.mkdir(parents=True, exist_ok=True)
         safe_display = "".join(c for c in display if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_") or kind
         sym_path = sym_dir / f"{safe_display}.json"
-        self._export_symbol_json(sym_path)
+        xform = self._export_symbol_json(sym_path)
+        scale = float((xform or {}).get("scale", 1.0))
+        tx = float((xform or {}).get("tx", 0.0))
+        ty = float((xform or {}).get("ty", 0.0))
+
+        def _norm_xy(x: float, y: float) -> tuple[float, float]:
+            return (x * scale + tx, y * scale + ty)
 
         root = Path(__file__).resolve().parent.parent / "assets" / "components" / "library"
         # Allow nested categories using "A/B" or "A / B"
@@ -758,13 +831,20 @@ class CustomComponentDialog(QDialog):
             "shortcut": shortcut,
             "spice_type": spice_type,
             "value_label": value_label,
+            "show_value": True,
+            "default_value": default_value,
             "type": comp_type,
             "net_name": net_name,
             "symbol": f"custom/{safe_display}.json",
             "auto_align_terminals": False,
             "auto_scale_symbol": False,
             "ports": [
-                {"name": p.name, "x": p.scenePos().x(), "y": p.scenePos().y()} for p in self._pin_items
+                {
+                    "name": p.name,
+                    "x": _norm_xy(p.scenePos().x(), p.scenePos().y())[0],
+                    "y": _norm_xy(p.scenePos().x(), p.scenePos().y())[1],
+                }
+                for p in self._pin_items
             ],
         }
         comp_path.write_text(json.dumps(data, indent=2))

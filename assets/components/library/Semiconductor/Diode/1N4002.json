@@ -6,21 +6,22 @@
   "shortcut": "",
   "spice_type": "D",
   "value_label": "Part Number",
-  "default_value": "1N4001",
+  "show_value": true,
+  "default_value": "1N4002",
   "type": "component",
   "net_name": "",
-  "symbol": "custom/1N4001.json",
+  "symbol": "custom/1N4002.json",
   "auto_align_terminals": false,
   "auto_scale_symbol": false,
   "ports": [
     {
       "name": "P1",
-      "x": -50.0,
+      "x": -45.0,
       "y": 0.0
     },
     {
       "name": "P2",
-      "x": 40.0,
+      "x": 45.0,
       "y": 0.0
     }
   ]

@@ -32,8 +32,18 @@ class SchematicView(QGraphicsView):
         """Right-drag to pan; left-click empty area clears selection."""
         if e.button() == Qt.RightButton:
             sc = self.scene()
+            if sc is not None:
+                mode = getattr(sc, "mode", None)
+                modes = getattr(sc, "Mode", object())
+                # In placement/wiring flows, let scene consume right-click as cancel.
+                if mode in (
+                    getattr(modes, "PLACE", None),
+                    getattr(modes, "WIRE", None),
+                ):
+                    super().mousePressEvent(e)
+                    return
             if sc is not None and getattr(sc, "mode", None) == getattr(sc, "Mode", object()).WIRE and getattr(sc, "_routing", False):
-                # Let right-click cancel wire routing in the scene.
+                # Fallback: let right-click cancel wire routing in the scene.
                 super().mousePressEvent(e)
                 return
             self._panning = True

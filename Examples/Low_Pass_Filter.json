@@ -1,0 +1,385 @@
+{
+  "components": [
+    {
+      "kind": "Capacitor",
+      "pos": [
+        -1200.0,
+        -120.0
+      ],
+      "rotation": 90.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "C1",
+      "value": "10nF",
+      "labels": {
+        "refdes_pos": [
+          -11.5078125,
+          -38.0
+        ],
+        "value_pos": [
+          11.038783559967442,
+          -32.16174561123216
+        ],
+        "refdes_manual": false,
+        "value_manual": true
+      }
+    },
+    {
+      "kind": "Oscope",
+      "pos": [
+        -1000.0,
+        -120.0
+      ],
+      "rotation": 90.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "O2",
+      "value": "Oscope",
+      "labels": {
+        "refdes_pos": [
+          -11.78125,
+          -12.001098659635247
+        ],
+        "value_pos": [
+          -68.0546875,
+          14.606689006079264
+        ],
+        "refdes_manual": true,
+        "value_manual": true
+      }
+    },
+    {
+      "kind": "Ground",
+      "pos": [
+        -1300.0,
+        60.0
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "GND",
+      "value": "GND",
+      "labels": {
+        "refdes_pos": [
+          -18.15625,
+          -43.625
+        ],
+        "value_pos": [
+          56.0,
+          -12.0
+        ],
+        "refdes_manual": false,
+        "value_manual": false
+      }
+    },
+    {
+      "kind": "Resistor",
+      "pos": [
+        -1200.0,
+        -300.0
+      ],
+      "rotation": 90.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "R1",
+      "value": "10k",
+      "labels": {
+        "refdes_pos": [
+          -11.1015625,
+          -38.0
+        ],
+        "value_pos": [
+          12.6171875,
+          -33.0
+        ],
+        "refdes_manual": false,
+        "value_manual": true
+      }
+    },
+    {
+      "kind": "Oscope",
+      "pos": [
+        -1500.0,
+        -240.0
+      ],
+      "rotation": 270.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": -1.0
+      },
+      "refdes": "O1",
+      "value": "Oscope",
+      "labels": {
+        "refdes_pos": [
+          16.125,
+          -38.00109865963525
+        ],
+        "value_pos": [
+          67.9453125,
+          -34.393310993920736
+        ],
+        "refdes_manual": true,
+        "value_manual": true
+      }
+    },
+    {
+      "kind": "WaveGen",
+      "pos": [
+        -1500.0,
+        -360.0
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "W1",
+      "value": "WaveGen",
+      "labels": {
+        "refdes_pos": [
+          -13.1484375,
+          -55.01406799531067
+        ],
+        "value_pos": [
+          -32.34375,
+          41.01406799531067
+        ],
+        "refdes_manual": false,
+        "value_manual": false
+      }
+    }
+  ],
+  "texts": [],
+  "wires": [
+    {
+      "points": [
+        {
+          "x": -1200.0,
+          "y": -80.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        0,
+        "B"
+      ],
+      "b_point": {
+        "x": -1200.0,
+        "y": 0.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1200.0,
+          "y": -160.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        0,
+        "A"
+      ],
+      "b_point": {
+        "x": -1200.0,
+        "y": -220.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1460.0,
+          "y": 0.0
+        },
+        {
+          "x": -1460.0,
+          "y": -220.0
+        }
+      ],
+      "mode": "orth",
+      "a_point": {
+        "x": -1300.0,
+        "y": 0.0
+      },
+      "b": [
+        4,
+        "-"
+      ]
+    },
+    {
+      "points": [],
+      "mode": "orth",
+      "a_point": {
+        "x": -1200.0,
+        "y": 0.0
+      },
+      "b_point": {
+        "x": -1300.0,
+        "y": 0.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1200.0,
+          "y": -240.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        3,
+        "B"
+      ],
+      "b_point": {
+        "x": -1200.0,
+        "y": -220.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1060.0,
+          "y": -100.0073243975683
+        },
+        {
+          "x": -1060.0,
+          "y": -100.0
+        },
+        {
+          "x": -1060.0,
+          "y": 0.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        1,
+        "-"
+      ],
+      "b_point": {
+        "x": -1200.0,
+        "y": 0.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1060.0,
+          "y": -139.9926756024317
+        },
+        {
+          "x": -1060.0,
+          "y": -140.0
+        },
+        {
+          "x": -1120.0,
+          "y": -140.0
+        },
+        {
+          "x": -1120.0,
+          "y": -220.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        1,
+        "+"
+      ],
+      "b_point": {
+        "x": -1200.0,
+        "y": -220.0
+      }
+    },
+    {
+      "points": [],
+      "mode": "orth",
+      "a": [
+        2,
+        "A"
+      ],
+      "b_point": {
+        "x": -1300.0,
+        "y": 0.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1460.0,
+          "y": -260.0
+        },
+        {
+          "x": -1320.0,
+          "y": -260.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        4,
+        "+"
+      ],
+      "b_point": {
+        "x": -1320.0,
+        "y": -360.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1460.0,
+          "y": -360.0
+        },
+        {
+          "x": -1320.0,
+          "y": -360.0
+        },
+        {
+          "x": -1200.0,
+          "y": -360.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        5,
+        "+"
+      ],
+      "b": [
+        3,
+        "A"
+      ]
+    }
+  ],
+  "settings": {
+    "grid_on": true,
+    "grid_size": 20,
+    "grid_style": "dots",
+    "snap_on": true,
+    "wire_junctions": [
+      {
+        "x": -1320.0,
+        "y": -360.0
+      },
+      {
+        "x": -1300.0,
+        "y": 0.0
+      },
+      {
+        "x": -1200.0,
+        "y": -220.0
+      },
+      {
+        "x": -1200.0,
+        "y": 0.0
+      }
+    ],
+    "net_names": []
+  },
+  "_format": 2
+}

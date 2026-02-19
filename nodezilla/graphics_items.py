@@ -6,7 +6,7 @@ from pathlib import Path
 import json
 from typing import Optional, List
 from PySide6.QtCore import Qt, QPointF, QRectF
-from PySide6.QtGui import QColor, QBrush, QPen, QPainterPath
+from PySide6.QtGui import QColor, QBrush, QPen, QPainterPath, QTransform, QFont
 from PySide6.QtWidgets import (
 QGraphicsItem, QGraphicsRectItem, QGraphicsEllipseItem, QGraphicsTextItem,
 QGraphicsPathItem
@@ -132,6 +132,75 @@ class JsonSymbolItem(QGraphicsPathItem):
         self.setBrush(Qt.NoBrush)
         self.setZValue(2)
 
+
+class CommentTextItem(QGraphicsTextItem):
+    """Free-form schematic comment text."""
+    def __init__(self, text: str = "Comment"):
+        super().__init__(text)
+        self.setTextInteractionFlags(Qt.NoTextInteraction)
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+        self.setZValue(6)
+        self._custom_color: QColor | None = None
+        self._apply_default_style()
+
+    def _apply_default_style(self):
+        self.setDefaultTextColor(QColor(220, 220, 220))
+
+    def apply_theme(self, theme: Theme):
+        self.setDefaultTextColor(self._custom_color or theme.text)
+
+    def set_text_color(self, color: QColor | None):
+        self._custom_color = QColor(color) if color is not None else None
+        sc = self.scene()
+        theme = getattr(sc, "theme", None) if sc else None
+        if theme is not None:
+            self.apply_theme(theme)
+        else:
+            self.setDefaultTextColor(self._custom_color or QColor(220, 220, 220))
+
+    def text_state(self) -> dict:
+        f = self.font()
+        c = self.defaultTextColor()
+        return {
+            "family": f.family(),
+            "point_size": int(f.pointSize()) if f.pointSize() > 0 else 12,
+            "bold": bool(f.bold()),
+            "italic": bool(f.italic()),
+            "color": c.name(QColor.HexRgb),
+            "custom_color": self._custom_color.name(QColor.HexRgb) if self._custom_color else "",
+        }
+
+    def apply_text_state(self, state: dict):
+        try:
+            f = QFont(self.font())
+            family = str(state.get("family", "")).strip()
+            if family:
+                f.setFamily(family)
+            f.setPointSize(max(1, int(state.get("point_size", 12))))
+            f.setBold(bool(state.get("bold", False)))
+            f.setItalic(bool(state.get("italic", False)))
+            self.setFont(f)
+            custom = str(state.get("custom_color", "")).strip()
+            if custom:
+                self.set_text_color(QColor(custom))
+            else:
+                col = str(state.get("color", "")).strip()
+                if col:
+                    self.set_text_color(QColor(col))
+        except Exception:
+            pass
+
+    def mouseDoubleClickEvent(self, e):
+        self.setTextInteractionFlags(Qt.TextEditorInteraction)
+        self.setFocus(Qt.MouseFocusReason)
+        super().mouseDoubleClickEvent(e)
+
+    def focusOutEvent(self, e):
+        self.setTextInteractionFlags(Qt.NoTextInteraction)
+        super().focusOutEvent(e)
+
 class ComponentItem(QGraphicsRectItem):
     """Component graphics + ports + labels.
 
@@ -144,6 +213,8 @@ class ComponentItem(QGraphicsRectItem):
         self.setBrush(QBrush(Qt.NoBrush))
         self.setPen(QPen(Qt.NoPen))
         self._theme: Theme | None = None
+        self._mirror_x = 1.0
+        self._mirror_y = 1.0
         self.setFlags(
             QGraphicsItem.ItemIsMovable |
             QGraphicsItem.ItemIsSelectable |
@@ -197,6 +268,24 @@ class ComponentItem(QGraphicsRectItem):
 
         # for undoable moves
         self._press_pos: Optional[QPointF] = None
+
+    def set_mirror(self, mirror_x: float, mirror_y: float):
+        self._mirror_x = -1.0 if mirror_x < 0 else 1.0
+        self._mirror_y = -1.0 if mirror_y < 0 else 1.0
+        self.setTransform(QTransform().scale(self._mirror_x, self._mirror_y))
+        for port in getattr(self, 'ports', []):
+            for w in list(port.wires):
+                w.update_path()
+        self._update_label()
+
+    def toggle_mirror_x(self):
+        self.set_mirror(-self._mirror_x, self._mirror_y)
+
+    def toggle_mirror_y(self):
+        self.set_mirror(self._mirror_x, -self._mirror_y)
+
+    def mirror_state(self):
+        return {"mx": float(self._mirror_x), "my": float(self._mirror_y)}
 
     def apply_theme(self, theme: Theme):
         self._theme = theme

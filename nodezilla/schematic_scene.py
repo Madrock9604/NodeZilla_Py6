@@ -8,7 +8,7 @@ import zlib
 from PySide6.QtCore import Qt, QPointF, QRectF, Signal, QTimer
 from PySide6.QtGui import QPen, QPainterPath, QTransform, QPainter, QBrush, QColor
 from PySide6.QtWidgets import QGraphicsScene, QLabel, QGraphicsView, QGraphicsItem, QGraphicsEllipseItem
-from .graphics_items import ComponentItem, PortItem
+from .graphics_items import ComponentItem, PortItem, CommentTextItem
 from .commands import SetWirePointsCommand
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -191,6 +191,14 @@ class SchematicScene(QGraphicsScene):
         self._remove_ghost(); self._clear_temp_wire()
         if self._view: self._view.setDragMode(QGraphicsView.RubberBandDrag)
         self.status_label.setText(f"Wire ({self._wire_mode_label()}): click ports or wires, double click to finish (Esc/right-click to cancel)")
+
+    def set_mode_text(self):
+        self.mode = SchematicScene.Mode.PLACE
+        self.component_to_place = "__TEXT__"
+        self._remove_ghost()
+        if self._view:
+            self._view.setDragMode(QGraphicsView.NoDrag)
+        self.status_label.setText("Text: click to place comment, Esc to cancel")
 
     # helpers
     def _ensure_ghost(self):
@@ -661,6 +669,19 @@ class SchematicScene(QGraphicsScene):
         scene_pos = e.scenePos()
         if self.mode == SchematicScene.Mode.PLACE and self.component_to_place:
             if e.button() == Qt.LeftButton:
+                if self.component_to_place == "__TEXT__":
+                    pos = self._snap_point(scene_pos)
+                    txt = CommentTextItem("Comment")
+                    txt.setPos(pos)
+                    if self.theme and hasattr(txt, "apply_theme"):
+                        txt.apply_theme(self.theme)
+                    self.addItem(txt)
+                    self.clearSelection()
+                    txt.setSelected(True)
+                    txt.setTextInteractionFlags(Qt.TextEditorInteraction)
+                    txt.setFocus(Qt.MouseFocusReason)
+                    self.status_label.setText(f"Placed text at {pos.x():.0f},{pos.y():.0f}")
+                    e.accept(); return
                 comp_def = load_component_library().get(self.component_to_place)
                 pos = None
                 if comp_def and getattr(comp_def, "comp_type", "component") == "net":
@@ -689,7 +710,11 @@ class SchematicScene(QGraphicsScene):
                                 comp.set_value(comp_def.display_name)
                 self.undo_stack.push(AddComponentCommand(self, comp))
                 self._bump_refseq(self.component_to_place)
-                if self._ghost_item: comp.setRotation(self._ghost_item.rotation())
+                if self._ghost_item:
+                    comp.setRotation(self._ghost_item.rotation())
+                    if hasattr(self._ghost_item, "mirror_state") and hasattr(comp, "set_mirror"):
+                        ms = self._ghost_item.mirror_state()
+                        comp.set_mirror(ms.get("mx", 1.0), ms.get("my", 1.0))
                 self.status_label.setText(f"Placed {comp.refdes} ({self.component_to_place}) at {pos.x():.0f},{pos.y():.0f}")
                 e.accept(); return
             elif e.button() == Qt.RightButton:
@@ -704,6 +729,8 @@ class SchematicScene(QGraphicsScene):
                     self._route_pts.clear()
                     self._route_start_port = None
                     self._route_start_point = None
+                # Always leave wire mode on right-click cancel.
+                self.set_mode_select()
                 e.accept(); return
 
             if e.button() == Qt.LeftButton:
@@ -781,10 +808,8 @@ class SchematicScene(QGraphicsScene):
             e.accept(); return
         if e.key() == Qt.Key_G:
             self.grid_on = not self.grid_on; self.update(); e.accept(); return
-        if e.key() == Qt.Key_D:
-            self.grid_style = 'dots' if self.grid_style == 'lines' else 'lines'
-            self.status_label.setText(f"Grid style: {self.grid_style}"); self.update(); e.accept(); return
-        if e.key() == Qt.Key_S and (e.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier)) == (Qt.ControlModifier | Qt.ShiftModifier):
+        ctrl_meta = Qt.ControlModifier | Qt.MetaModifier
+        if e.key() == Qt.Key_S and (e.modifiers() & Qt.ShiftModifier) and (e.modifiers() & ctrl_meta):
             self.snap_on = not self.snap_on; self.status_label.setText(f"Snap: {'ON' if self.snap_on else 'OFF'} (grid {self.grid_size})"); e.accept(); return
         if e.key() == Qt.Key_W and (e.modifiers() & Qt.ShiftModifier):
             order = ["orth", "45", "free"]
@@ -793,10 +818,14 @@ class SchematicScene(QGraphicsScene):
             self.status_label.setText(f"Wire mode: {self._wire_mode_label()} (Shift+W to cycle)")
             e.accept(); return
         if self.mode == SchematicScene.Mode.PLACE and self._ghost_item is not None:
-            if e.key() == Qt.Key_BracketRight:
+            if e.key() in (Qt.Key_BracketRight, Qt.Key_R) and not (e.modifiers() & Qt.ShiftModifier):
                 self._ghost_item.setRotation((self._ghost_item.rotation()+90)%360); e.accept(); return
-            if e.key() == Qt.Key_BracketLeft:
+            if e.key() in (Qt.Key_BracketLeft, Qt.Key_R) and (e.modifiers() & Qt.ShiftModifier):
                 self._ghost_item.setRotation((self._ghost_item.rotation()-90)%360); e.accept(); return
+            if e.key() == Qt.Key_X and hasattr(self._ghost_item, "toggle_mirror_x"):
+                self._ghost_item.toggle_mirror_x(); e.accept(); return
+            if e.key() == Qt.Key_Y and hasattr(self._ghost_item, "toggle_mirror_y"):
+                self._ghost_item.toggle_mirror_y(); e.accept(); return
             if e.key() == Qt.Key_Escape:
                 self.set_mode_select(); e.accept(); return
         if self.mode == SchematicScene.Mode.WIRE and e.key() == Qt.Key_Escape:
@@ -806,7 +835,11 @@ class SchematicScene(QGraphicsScene):
                 self._route_pts.clear()
                 self._route_start_port = None
                 self._route_start_point = None
-            else: self.set_mode_select()
+            self.set_mode_select()
+            e.accept(); return
+        if e.key() == Qt.Key_Escape:
+            self.clearSelection()
+            self.set_mode_select()
             e.accept(); return
         super().keyPressEvent(e)
 
@@ -827,15 +860,55 @@ class SchematicScene(QGraphicsScene):
 
     def _next_refdes(self, kind: str) -> str:
         p = self._prefix_for_kind(kind)
-        if p == 'GND': return 'GND'
-        n = self._refseq.get(p, 1)
+        if p == 'GND':
+            return 'GND'
+        used = self._used_refdes_numbers(p)
+        n = 1
+        while n in used:
+            n += 1
         return f"{p}{n}"
 
     def _bump_refseq(self, kind: str):
+        # Refdes assignment is now derived from current scene occupancy.
+        # Keep method for compatibility with existing call sites.
         p = self._prefix_for_kind(kind)
         if p == 'GND':
             return
-        self._refseq[p] = self._refseq.get(p, 1) + 1
+        used = self._used_refdes_numbers(p)
+        self._refseq[p] = (max(used) + 1) if used else 1
+
+    def _extract_refdes_number(self, refdes: str, prefix: str) -> int | None:
+        text = (refdes or "").strip()
+        if not text:
+            return None
+        if text.startswith(prefix):
+            digits = text[len(prefix):]
+        else:
+            # Fallback for manually edited refs: trailing digits only.
+            i = len(text)
+            while i > 0 and text[i - 1].isdigit():
+                i -= 1
+            digits = text[i:]
+        if not digits.isdigit():
+            return None
+        try:
+            return int(digits)
+        except Exception:
+            return None
+
+    def _used_refdes_numbers(self, prefix: str) -> set[int]:
+        used: set[int] = set()
+        for it in self.items():
+            if not isinstance(it, ComponentItem):
+                continue
+            if not it.refdes:
+                continue
+            if self._prefix_for_kind(it.kind) != prefix:
+                continue
+            num = self._extract_refdes_number(it.refdes, prefix)
+            if num is not None and num > 0:
+                used.add(num)
+        return used
 
     def _reseed_refseq(self):
         counters: Dict[str, int] = {}
@@ -844,18 +917,9 @@ class SchematicScene(QGraphicsScene):
                 prefix = self._prefix_for_kind(it.kind)
                 if prefix == 'GND':
                     continue
-                text = it.refdes.strip()
-                if text.startswith(prefix):
-                    digits = text[len(prefix):]
-                else:
-                    # Fallback: use trailing digits if refdes was manually edited.
-                    i = len(text)
-                    while i > 0 and text[i - 1].isdigit():
-                        i -= 1
-                    digits = text[i:]
-                if not digits.isdigit():
+                num = self._extract_refdes_number(it.refdes, prefix)
+                if num is None:
                     continue
-                num = int(digits)
                 counters[prefix] = max(counters.get(prefix, 0), num)
         self._refseq = {p: n + 1 for p, n in counters.items()}
 
@@ -1073,10 +1137,20 @@ class SchematicScene(QGraphicsScene):
             'kind': c.kind,
             'pos': [c.scenePos().x(), c.scenePos().y()],
             'rotation': c.rotation(),
+            'mirror': c.mirror_state() if hasattr(c, "mirror_state") else {"mx": 1.0, "my": 1.0},
             'refdes': c.refdes,
             'value': c.value,
             'labels': c.labels_state() if hasattr(c, "labels_state") else {},
         } for c in comps],
+        'texts': [
+            {
+                'text': t.toPlainText(),
+                'pos': [float(t.scenePos().x()), float(t.scenePos().y())],
+                'style': t.text_state() if hasattr(t, "text_state") else {},
+            }
+            for t in self.items()
+            if isinstance(t, CommentTextItem)
+        ],
         'wires': wire_data,
         'settings': {
             'grid_on': self.grid_on, 'grid_size': self.grid_size,
@@ -1112,7 +1186,12 @@ class SchematicScene(QGraphicsScene):
         for cdata in data.get('components', []):
             kind = cdata['kind']; x, y = cdata['pos']; rot = cdata.get('rotation', 0)
             c = ComponentItem(kind, QPointF(x, y)); c.setRotation(rot)
+            mirror = cdata.get("mirror", {})
+            if hasattr(c, "set_mirror"):
+                c.set_mirror(float(mirror.get("mx", 1.0)), float(mirror.get("my", 1.0)))
             c.set_refdes(cdata.get('refdes', "")); c.set_value(cdata.get('value', ""))
+            if self.theme and hasattr(c, "apply_theme"):
+                c.apply_theme(self.theme)
             if hasattr(c, "apply_labels_state"):
                 c.apply_labels_state(cdata.get('labels', {}))
             if not c.value:
@@ -1128,10 +1207,25 @@ class SchematicScene(QGraphicsScene):
                             if cdef.display_name:
                                 c.set_value(cdef.display_name)
             self.addItem(c); comps.append(c)
+        for tdata in data.get('texts', []):
+            try:
+                text = str(tdata.get('text', 'Comment'))
+                pos = tdata.get('pos', [0.0, 0.0])
+                t = CommentTextItem(text)
+                t.setPos(QPointF(float(pos[0]), float(pos[1])))
+                if hasattr(t, "apply_text_state"):
+                    t.apply_text_state(tdata.get("style", {}))
+                if self.theme and hasattr(t, "apply_theme"):
+                    t.apply_theme(self.theme)
+                self.addItem(t)
+            except Exception:
+                pass
         for wdata in data.get('wires', []):
             (ai, aside) = wdata.get('a', [None, None]); (bi, bside) = wdata.get('b', [None, None])
             a_point = wdata.get('a_point'); b_point = wdata.get('b_point')
             try:
+                if _WireItem is None:
+                    continue
                 pa = pb = None
                 start_point = end_point = None
                 if ai is not None and aside is not None:
@@ -1147,7 +1241,13 @@ class SchematicScene(QGraphicsScene):
                     end_point = QPointF(b_point['x'], b_point['y'])
 
                 route_mode = wdata.get("mode", "orth")
-                wire = WireItem(pa, pb, start_point=start_point, end_point=end_point, theme=getattr(self, "theme", None), route_mode=route_mode)
+                wire = _WireItem(
+                    pa, pb,
+                    start_point=start_point,
+                    end_point=end_point,
+                    theme=getattr(self, "theme", None),
+                    route_mode=route_mode,
+                )
                 pts = [QPointF(d['x'], d['y']) for d in wdata.get('points', [])]
                 if pts:
                     wire.set_points(pts)

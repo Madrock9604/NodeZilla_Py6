@@ -132,12 +132,15 @@ class DeleteItemsCommand(QUndoCommand):
         # This avoids leaving dangling wires when only components are selected.
         comps = []
         wires = []
+        others = []
 
         for it in selected_items:
             if _ComponentItem is not None and isinstance(it, _ComponentItem):
                 comps.append(it)
             elif _WireItem is not None and isinstance(it, _WireItem):
                 wires.append(it)
+            else:
+                others.append(it)
 
         # Add wires attached to selected components
         for c in comps:
@@ -151,6 +154,7 @@ class DeleteItemsCommand(QUndoCommand):
         # Dedup, and store ordering for redo/undo
         self._comps = list(dict.fromkeys(comps))
         self._wires = list(dict.fromkeys(wires))
+        self._others = list(dict.fromkeys(others))
 
     def redo(self):
         # Remove wires first, then components
@@ -163,6 +167,8 @@ class DeleteItemsCommand(QUndoCommand):
 
         for c in self._comps:
             self.scene.removeItem(c)  # components go after wires
+        for it in self._others:
+            self.scene.removeItem(it)
 
     def undo(self):
         # Restore components first, so ports exist
@@ -177,6 +183,8 @@ class DeleteItemsCommand(QUndoCommand):
             # ensure the path reflects current port positions
             if hasattr(w, "update_path"):
                 w.update_path()
+        for it in self._others:
+            self.scene.addItem(it)
         if hasattr(self.scene, "_rebuild_junction_markers"):
             self.scene._rebuild_junction_markers()
 

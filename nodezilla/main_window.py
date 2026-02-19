@@ -7,19 +7,19 @@ from pathlib import Path
 import os
 import tempfile
 import time
-from PySide6.QtCore import Qt, QEvent, QTimer
-from PySide6.QtGui import QAction, QKeySequence, QUndoStack
+from PySide6.QtCore import Qt, QEvent, QTimer, QPointF
+from PySide6.QtGui import QAction, QKeySequence, QUndoStack, QIcon, QColor
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QToolBar, QLabel, QSpinBox,
     QDockWidget, QStatusBar, QFileDialog, QMessageBox, QDialog, QInputDialog, QTextEdit,
-    QComboBox, QPushButton
+    QComboBox, QPushButton, QToolButton
 )
 import json
 from .schematic_scene import SchematicScene
 from .schematic_view import SchematicView
 from .properties_panel import PropertiesPanel
 from .net_panel import NetPanel
-from .graphics_items import ComponentItem, WireItem
+from .graphics_items import ComponentItem, WireItem, CommentTextItem
 from .commands import DeleteItemsCommand, RotateComponentCommand
 from .theme import ThemeWatcher
 from .component_library import load_component_library
@@ -42,7 +42,7 @@ class SchematicTab(QWidget):
 
 
 class FloatingToolIsland(QWidget):
-    """Draggable floating controls that reflow by nearest viewport edge."""
+    """Top-docked schematic control island."""
 
     def __init__(self, parent: QWidget):
         super().__init__(parent)
@@ -85,34 +85,13 @@ class FloatingToolIsland(QWidget):
                 self._layout.addWidget(w, row, 0)
                 w.show()
         else:
-            # Horizontal mode: bounded packing by max column count computed
-            # from viewport width and control widths.
-            p = self.parentWidget()
-            if p is not None:
-                avail_w = max(280, p.width() - max(8, self.x()) - 12)
-            else:
-                avail_w = 1200
-            spacing = self._layout.horizontalSpacing()
-            margins = self._layout.contentsMargins()
-            inner_w = max(200, avail_w - margins.left() - margins.right())
-            max_cell_w = 56
-            for w in self._widgets:
-                max_cell_w = max(max_cell_w, w.minimumSizeHint().width(), w.sizeHint().width())
-            cols = max(1, int((inner_w + spacing) / max(1, (max_cell_w + spacing))))
             for i, w in enumerate(self._widgets):
-                row = i // cols
-                col = i % cols
-                self._layout.addWidget(w, row, col)
+                self._layout.addWidget(w, 0, i)
                 w.show()
         self._layout_orientation = orientation
         self.setMinimumSize(0, 0)
         self.resize(self.sizeHint())
         self.adjustSize()
-        if orientation == "h":
-            p = self.parentWidget()
-            if p is not None:
-                nx = max(8, min(self.x(), max(8, p.width() - self.width() - 8)))
-                self.move(nx, self.y())
         self._clamp_to_parent()
 
     def reset_default_geometry(self):
@@ -122,7 +101,7 @@ class FloatingToolIsland(QWidget):
             return
         if p.width() < 220 or p.height() < 140:
             return
-        # Always start horizontal at top-center.
+        # Always stay horizontal and top-centered.
         self._rebuild_layout("h")
         x = max(8, int((p.width() - self.width()) / 2))
         x = min(x, max(8, p.width() - self.width() - 8))
@@ -165,47 +144,16 @@ class FloatingToolIsland(QWidget):
                     # Defer until viewport has a stable size.
                     QTimer.singleShot(0, self.reset_default_geometry)
                 else:
-                    # Reflow to current viewport size before clamping.
-                    self._rebuild_layout(self._layout_orientation)
-                self._clamp_to_parent()
+                    self.reset_default_geometry()
         return super().eventFilter(obj, event)
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._dragging = True
-            self._drag_offset = event.position().toPoint()
-            event.accept()
-            return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if self._dragging and self._drag_offset is not None:
-            target = self.mapToParent(event.position().toPoint() - self._drag_offset)
-            self.move(target)
-            self._clamp_to_parent()
-            event.accept()
-            return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if self._dragging and event.button() == Qt.LeftButton:
-            self._dragging = False
-            desired = self._nearest_edge_orientation()
-            if desired != self._layout_orientation:
-                self._rebuild_layout(desired)
-                # Keep horizontal dock readable after mode switch.
-                if desired == "h":
-                    p = self.parentWidget()
-                    if p is not None:
-                        nx = max(8, int((p.width() - self.width()) / 2))
-                        self.move(nx, self.y())
-                        self._clamp_to_parent()
-            else:
-                # Even with same orientation, reflow to ensure bounds fit.
-                self._rebuild_layout(self._layout_orientation)
-                self._clamp_to_parent()
-            event.accept()
-            return
         super().mouseReleaseEvent(event)
 
 
@@ -218,6 +166,8 @@ class MainWindow(QMainWindow):
         # Runtime netlist outputs for external automation/gizmo flows.
         self.runtime_spice_netlist_text: str = ""
         self.runtime_spice_netlist_path: str = ""
+        self._clipboard_payload: dict | None = None
+        self._paste_serial: int = 0
 
         self.tabs = QTabWidget()
         self.status_label = QLabel("Ready")
@@ -278,6 +228,7 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
         self._build_schematic_island()
         self._build_menu()
+        self._build_schematic_shortcuts()
 
         view_menu = self.menuBar().addMenu("View")
         view_menu.addAction(self.props_dock.toggleViewAction())
@@ -365,6 +316,10 @@ class MainWindow(QMainWindow):
     def _on_selection_changed(self):
         """Push active selection into the properties panel."""
         selected = self.schematic_tab.scene.selectedItems()
+        texts = [it for it in selected if isinstance(it, CommentTextItem)]
+        if texts:
+            self.props_panel.show_text(texts[0])
+            return
         wires = [it for it in selected if isinstance(it, WireItem)]
         if wires:
             self.props_panel.show_wire(wires[0])
@@ -372,8 +327,35 @@ class MainWindow(QMainWindow):
         comps = [it for it in self.schematic_tab.scene.selectedItems() if isinstance(it, ComponentItem)]
         self.props_panel.show_component(comps[0] if comps else None)
 
-    def _apply_properties(self, kind: str | None, refdes: str | None, value: str | None, wire_color: str):
+    def _apply_properties(
+        self,
+        kind: str | None,
+        refdes: str | None,
+        value: str | None,
+        wire_color: str,
+        text_value: str = "",
+        text_size: int = 12,
+        text_bold: bool = False,
+        text_italic: bool = False,
+        text_color: str = "",
+        text_family: str = "",
+    ):
         """Apply edits from PropertiesPanel back to selected scene items."""
+        if kind == "text":
+            texts = [it for it in self.schematic_tab.scene.selectedItems() if isinstance(it, CommentTextItem)]
+            for t in texts:
+                if text_value is not None:
+                    t.setPlainText(text_value)
+                f = t.font()
+                if text_family:
+                    f.setFamily(text_family)
+                f.setPointSize(max(1, int(text_size)))
+                f.setBold(bool(text_bold))
+                f.setItalic(bool(text_italic))
+                t.setFont(f)
+                if hasattr(t, "set_text_color"):
+                    t.set_text_color(QColor(text_color) if text_color else None)
+            return
         if kind == "wire":
             wires = [it for it in self.schematic_tab.scene.selectedItems() if isinstance(it, WireItem)]
             for w in wires:
@@ -493,9 +475,31 @@ class MainWindow(QMainWindow):
                 continue
             act = QAction(f"Place {comp.display_name}", self)
             act.setShortcut(comp.shortcut)
-            act.triggered.connect(lambda _=False, k=comp.kind: self.schematic_tab.scene.set_mode_place(k))
+            act.triggered.connect(
+                lambda _=False, k=comp.kind, s=str(comp.shortcut): self._handle_component_shortcut(k, s)
+            )
             self.addAction(act)
             self._component_shortcut_actions.append(act)
+
+    def _handle_component_shortcut(self, kind: str, shortcut: str):
+        """Resolve conflicts between placement hotkeys and component shortcuts."""
+        sc = self.schematic_tab.scene
+        key = shortcut.strip().upper()
+        if self._is_schematic_active() and key == "T":
+            sc.set_mode_text()
+            return
+        # While placing a component, let R rotate the ghost instead of
+        # switching tool to the resistor shortcut.
+        if (
+            self._is_schematic_active()
+            and getattr(sc, "mode", None) == getattr(sc, "Mode", object()).PLACE
+            and getattr(sc, "_ghost_item", None) is not None
+            and key == "R"
+        ):
+            g = sc._ghost_item
+            g.setRotation((g.rotation() + 90) % 360)
+            return
+        sc.set_mode_place(kind)
 
     def _build_toolbar(self):
         """Create top-level CAD actions for editing/navigation/export."""
@@ -510,6 +514,7 @@ class MainWindow(QMainWindow):
         tb.addAction(act_select)
 
         act_components = QAction("Components", self)
+        act_components.setShortcut("A")
         def _open_components():
             self.component_dock.show()
             self.component_dock.raise_()
@@ -523,6 +528,10 @@ class MainWindow(QMainWindow):
         act_wire.setShortcut("W")
         act_wire.triggered.connect(self.schematic_tab.scene.set_mode_wire)
         tb.addAction(act_wire)
+        act_text = QAction("Text", self)
+        act_text.setShortcut("T")
+        act_text.triggered.connect(self.schematic_tab.scene.set_mode_text)
+        tb.addAction(act_text)
         act_net_label = QAction("Net Label", self)
         act_net_label.triggered.connect(lambda: self.schematic_tab.scene.set_mode_place("NetLabel"))
         tb.addAction(act_net_label)
@@ -545,16 +554,14 @@ class MainWindow(QMainWindow):
 
         tb.addSeparator()
         act_grid = QAction("Grid G", self)
+        act_grid.setShortcut(QKeySequence("Ctrl+G"))
         act_grid.triggered.connect(self._toggle_grid)
         tb.addAction(act_grid)
 
         act_snap = QAction("Snap Ctrl+S", self)
+        act_snap.setShortcut(QKeySequence("Ctrl+Shift+S"))
         act_snap.triggered.connect(self._toggle_snap)
         tb.addAction(act_snap)
-
-        act_grid_style = QAction("Grid Style (D)", self)
-        act_grid_style.triggered.connect(self._toggle_grid_style)
-        tb.addAction(act_grid_style)
 
         tb.addSeparator()
         tb.addWidget(QLabel("Grid:"))
@@ -609,28 +616,38 @@ class MainWindow(QMainWindow):
         island = FloatingToolIsland(vp)
         self._schematic_island = island
 
-        def btn(text: str, cb):
-            b = QPushButton(text, island)
-            b.setMinimumHeight(24)
-            b.setMinimumWidth(92)
+        def btn(text: str, cb, *, icon_name: str = ""):
+            b = QToolButton(island)
+            b.setAutoRaise(False)
+            b.setToolTip(text)
+            b.setMinimumHeight(28)
+            b.setMinimumWidth(36)
+            icon = QIcon.fromTheme(icon_name) if icon_name else QIcon()
+            if not icon.isNull():
+                b.setIcon(icon)
+                b.setText("")
+            else:
+                b.setText(text)
             b.clicked.connect(cb)
             return b
 
-        select_btn = btn("Select", self.schematic_tab.scene.set_mode_select)
-        components_btn = btn("Components", lambda: (self.component_dock.show(), self.component_dock.raise_()))
-        wire_btn = btn("Wire", self.schematic_tab.scene.set_mode_wire)
-        net_label_btn = btn("Net Label", lambda: self.schematic_tab.scene.set_mode_place("NetLabel"))
-        delete_btn = btn("Delete", self._delete_selected)
-        rot_cw_btn = btn("Rotate ⟳", lambda: self._rotate_selected(90))
-        rot_ccw_btn = btn("Rotate ⟲", lambda: self._rotate_selected(-90))
-        grid_btn = btn("Grid G", self._toggle_grid)
-        snap_btn = btn("Snap Ctrl+S", self._toggle_snap)
-        grid_style_btn = btn("Grid Style (D)", self._toggle_grid_style)
-        fit_btn = btn("Fit", self.schematic_tab.view.fit_all)
-        zoom_in_btn = btn("Zoom +", lambda: self.schematic_tab.view.scale(1.15, 1.15))
-        zoom_out_btn = btn("Zoom -", lambda: self.schematic_tab.view.scale(1 / 1.15, 1 / 1.15))
-        export_btn = btn("Export Netlist", self._export_netlist)
-        runtime_btn = btn("Build Runtime Netlist", self._build_runtime_netlist)
+        select_btn = btn("Select", self.schematic_tab.scene.set_mode_select, icon_name="cursor-arrow")
+        components_btn = btn("Components", lambda: (self.component_dock.show(), self.component_dock.raise_()), icon_name="folder")
+        wire_btn = btn("Wire", self.schematic_tab.scene.set_mode_wire, icon_name="draw-line")
+        text_btn = btn("Text", self.schematic_tab.scene.set_mode_text, icon_name="insert-text")
+        net_label_btn = btn("Net Label", lambda: self.schematic_tab.scene.set_mode_place("NetLabel"), icon_name="tag")
+        delete_btn = btn("Delete", self._delete_selected, icon_name="edit-delete")
+        rot_cw_btn = btn("Rotate CW", lambda: self._rotate_selected(90), icon_name="object-rotate-right")
+        rot_ccw_btn = btn("Rotate CCW", lambda: self._rotate_selected(-90), icon_name="object-rotate-left")
+        mirror_x_btn = btn("Mirror X", self._on_shortcut_place_mirror_x, icon_name="object-flip-horizontal")
+        mirror_y_btn = btn("Mirror Y", self._on_shortcut_place_mirror_y, icon_name="object-flip-vertical")
+        grid_btn = btn("Grid", self._toggle_grid, icon_name="view-grid")
+        snap_btn = btn("Snap", self._toggle_snap, icon_name="snap-to-grid")
+        fit_btn = btn("Fit", self.schematic_tab.view.fit_all, icon_name="zoom-fit-best")
+        zoom_in_btn = btn("Zoom In", lambda: self.schematic_tab.view.scale(1.15, 1.15), icon_name="zoom-in")
+        zoom_out_btn = btn("Zoom Out", lambda: self.schematic_tab.view.scale(1 / 1.15, 1 / 1.15), icon_name="zoom-out")
+        export_btn = btn("Export Netlist", self._export_netlist, icon_name="document-save")
+        runtime_btn = btn("Build Runtime Netlist", self._build_runtime_netlist, icon_name="media-playback-start")
 
         grid_label = QLabel("Grid:", island)
         self._island_grid_spin = QSpinBox(island)
@@ -643,14 +660,21 @@ class MainWindow(QMainWindow):
         grid_plus_btn = btn("Grid +", lambda: self._nudge_grid(5))
 
         island.add_controls([
-            select_btn, components_btn, wire_btn, net_label_btn, delete_btn,
-            rot_cw_btn, rot_ccw_btn, grid_btn, snap_btn, grid_style_btn,
+            select_btn, components_btn, wire_btn, text_btn, net_label_btn, delete_btn,
+            rot_cw_btn, rot_ccw_btn, mirror_x_btn, mirror_y_btn, grid_btn, snap_btn,
             grid_label, self._island_grid_spin, grid_minus_btn, grid_plus_btn,
             fit_btn, zoom_in_btn, zoom_out_btn, export_btn, runtime_btn,
         ])
         island.move(20, 20)
         island.show()
         QTimer.singleShot(0, island.reset_default_geometry)
+        # Keep island pinned to top when the canvas is panned/scrolled.
+        self.schematic_tab.view.horizontalScrollBar().valueChanged.connect(
+            lambda _v: island.reset_default_geometry()
+        )
+        self.schematic_tab.view.verticalScrollBar().valueChanged.connect(
+            lambda _v: island.reset_default_geometry()
+        )
 
     def _build_menu(self):
         """Create file menu actions (new/open/save/export/custom parts)."""
@@ -694,6 +718,29 @@ class MainWindow(QMainWindow):
         act_quit.setShortcut(QKeySequence.Quit)
         act_quit.triggered.connect(self.close)
         fm.addAction(act_quit)
+
+    def _build_schematic_shortcuts(self):
+        """Register schematic-only command shortcuts (Cmd/Ctrl aware)."""
+        def add_shortcut(seq, cb):
+            act = QAction(self)
+            act.setShortcut(seq)
+            act.triggered.connect(cb)
+            self.addAction(act)
+            return act
+
+        self._act_toggle_grid = add_shortcut(QKeySequence("Ctrl+G"), self._on_shortcut_toggle_grid)
+        self._act_toggle_snap = add_shortcut(QKeySequence("Ctrl+Shift+S"), self._on_shortcut_toggle_snap)
+        self._act_wire = add_shortcut(QKeySequence("W"), self._on_shortcut_set_wire)
+        self._act_text = add_shortcut(QKeySequence("T"), self._on_shortcut_set_text)
+        self._act_fit = add_shortcut(QKeySequence("F"), self._on_shortcut_fit)
+        self._act_components = add_shortcut(QKeySequence("A"), self._on_shortcut_open_components)
+        self._act_escape = add_shortcut(QKeySequence(Qt.Key_Escape), self._on_shortcut_escape_to_select)
+        self._act_place_rot_ccw = add_shortcut(QKeySequence("Shift+R"), self._on_shortcut_place_rotate_ccw)
+        self._act_place_mirror_x = add_shortcut(QKeySequence("X"), self._on_shortcut_place_mirror_x)
+        self._act_place_mirror_y = add_shortcut(QKeySequence("Y"), self._on_shortcut_place_mirror_y)
+        self._act_cut = add_shortcut(QKeySequence.Cut, self._on_shortcut_cut)
+        self._act_copy = add_shortcut(QKeySequence.Copy, self._on_shortcut_copy)
+        self._act_paste = add_shortcut(QKeySequence.Paste, self._on_shortcut_paste)
 
     # grid/snap helpers
     def _toggle_grid(self):
@@ -745,6 +792,210 @@ class MainWindow(QMainWindow):
         sel = list(sc.selectedItems())
         if sel:
             sc.undo_stack.push(DeleteItemsCommand(sc, sel))
+
+    def _is_schematic_active(self) -> bool:
+        return self.tabs.currentWidget() is self.schematic_tab
+
+    def _on_shortcut_toggle_grid(self):
+        if self._is_schematic_active():
+            self._toggle_grid()
+
+    def _on_shortcut_toggle_snap(self):
+        if self._is_schematic_active():
+            self._toggle_snap()
+
+    def _on_shortcut_set_wire(self):
+        if self._is_schematic_active():
+            self.schematic_tab.scene.set_mode_wire()
+
+    def _on_shortcut_set_text(self):
+        if self._is_schematic_active():
+            self.schematic_tab.scene.set_mode_text()
+
+    def _on_shortcut_fit(self):
+        if self._is_schematic_active():
+            self.schematic_tab.view.fit_all()
+
+    def _on_shortcut_open_components(self):
+        if not self._is_schematic_active():
+            return
+        self.component_dock.show()
+        self.component_dock.raise_()
+        if hasattr(self.component_panel, "search"):
+            self.component_panel.search.setFocus()
+
+    def _on_shortcut_escape_to_select(self):
+        if not self._is_schematic_active():
+            return
+        sc = self.schematic_tab.scene
+        sc.clearSelection()
+        sc.set_mode_select()
+
+    def _in_place_mode_with_ghost(self) -> bool:
+        if not self._is_schematic_active():
+            return False
+        sc = self.schematic_tab.scene
+        return (
+            getattr(sc, "mode", None) == getattr(sc, "Mode", object()).PLACE
+            and getattr(sc, "_ghost_item", None) is not None
+        )
+
+    def _on_shortcut_place_rotate_cw(self):
+        if not self._in_place_mode_with_ghost():
+            return
+        g = self.schematic_tab.scene._ghost_item
+        g.setRotation((g.rotation() + 90) % 360)
+
+    def _on_shortcut_place_rotate_ccw(self):
+        if not self._in_place_mode_with_ghost():
+            return
+        g = self.schematic_tab.scene._ghost_item
+        g.setRotation((g.rotation() - 90) % 360)
+
+    def _on_shortcut_place_mirror_x(self):
+        if not self._in_place_mode_with_ghost():
+            return
+        g = self.schematic_tab.scene._ghost_item
+        if hasattr(g, "toggle_mirror_x"):
+            g.toggle_mirror_x()
+
+    def _on_shortcut_place_mirror_y(self):
+        if not self._in_place_mode_with_ghost():
+            return
+        g = self.schematic_tab.scene._ghost_item
+        if hasattr(g, "toggle_mirror_y"):
+            g.toggle_mirror_y()
+
+    def _on_shortcut_copy(self):
+        if not self._is_schematic_active():
+            return
+        sc = self.schematic_tab.scene
+        selected = list(sc.selectedItems())
+        comps = [it for it in selected if isinstance(it, ComponentItem)]
+        wires_selected = [it for it in selected if isinstance(it, WireItem)]
+        if not comps and not wires_selected:
+            return
+
+        comp_map = {c: i for i, c in enumerate(comps)}
+        payload = {"components": [], "wires": []}
+        for c in comps:
+            payload["components"].append({
+                "kind": c.kind,
+                "pos": [float(c.scenePos().x()), float(c.scenePos().y())],
+                "rotation": float(c.rotation()),
+                "mirror": c.mirror_state() if hasattr(c, "mirror_state") else {"mx": 1.0, "my": 1.0},
+                "value": c.value,
+                "labels": c.labels_state() if hasattr(c, "labels_state") else {},
+            })
+
+        all_wires = [it for it in sc.items() if isinstance(it, WireItem)]
+        for w in all_wires:
+            include = (w in wires_selected)
+            if not include:
+                pa = getattr(w, "port_a", None)
+                pb = getattr(w, "port_b", None)
+                include = bool(
+                    pa is not None and pb is not None and
+                    pa.parentItem() in comp_map and pb.parentItem() in comp_map
+                )
+            if not include:
+                continue
+            entry = {
+                "points": [{"x": float(p.x()), "y": float(p.y())} for p in getattr(w, "_pts", [])],
+                "mode": getattr(w, "route_mode", "orth"),
+            }
+            if hasattr(w, "wire_color_hex"):
+                c = w.wire_color_hex()
+                if c:
+                    entry["color"] = c
+            pa = getattr(w, "port_a", None)
+            pb = getattr(w, "port_b", None)
+            if pa is not None and pa.parentItem() in comp_map:
+                entry["a"] = [comp_map[pa.parentItem()], getattr(pa, "name", "A")]
+            elif getattr(w, "_start_point", None) is not None:
+                entry["a_point"] = {"x": float(w._start_point.x()), "y": float(w._start_point.y())}
+            if pb is not None and pb.parentItem() in comp_map:
+                entry["b"] = [comp_map[pb.parentItem()], getattr(pb, "name", "B")]
+            elif getattr(w, "_end_point", None) is not None:
+                entry["b_point"] = {"x": float(w._end_point.x()), "y": float(w._end_point.y())}
+            if "a" in entry or "a_point" in entry or "b" in entry or "b_point" in entry:
+                payload["wires"].append(entry)
+
+        self._clipboard_payload = payload
+        self._paste_serial = 0
+
+    def _on_shortcut_cut(self):
+        if not self._is_schematic_active():
+            return
+        self._on_shortcut_copy()
+        self._delete_selected()
+
+    def _on_shortcut_paste(self):
+        if not self._is_schematic_active():
+            return
+        payload = self._clipboard_payload or {}
+        comps_data = payload.get("components", [])
+        wires_data = payload.get("wires", [])
+        if not comps_data and not wires_data:
+            return
+        sc = self.schematic_tab.scene
+        self._paste_serial += 1
+        d = float(getattr(sc, "grid_size", 20) * self._paste_serial)
+        delta = QPointF(d, d)
+
+        new_comps: list[ComponentItem] = []
+        for cdata in comps_data:
+            kind = cdata.get("kind", "")
+            pos = cdata.get("pos", [0.0, 0.0])
+            c = ComponentItem(kind, QPointF(float(pos[0]), float(pos[1])) + delta)
+            c.setRotation(float(cdata.get("rotation", 0.0)))
+            m = cdata.get("mirror", {})
+            if hasattr(c, "set_mirror"):
+                c.set_mirror(float(m.get("mx", 1.0)), float(m.get("my", 1.0)))
+            c.set_refdes(sc._next_refdes(kind))
+            sc._bump_refseq(kind)
+            c.set_value(str(cdata.get("value", "")))
+            if hasattr(c, "apply_labels_state"):
+                c.apply_labels_state(cdata.get("labels", {}))
+            sc.addItem(c)
+            if sc.theme and hasattr(c, "apply_theme"):
+                c.apply_theme(sc.theme)
+            new_comps.append(c)
+
+        for wdata in wires_data:
+            ai, aside = wdata.get("a", [None, None])
+            bi, bside = wdata.get("b", [None, None])
+            pa = pb = None
+            a_point = b_point = None
+            if ai is not None and isinstance(ai, int) and 0 <= ai < len(new_comps):
+                ca = new_comps[ai]
+                pa = next((p for p in getattr(ca, "ports", []) if getattr(p, "name", None) == aside), None)
+            elif isinstance(wdata.get("a_point"), dict):
+                ap = wdata["a_point"]
+                a_point = QPointF(float(ap.get("x", 0.0)), float(ap.get("y", 0.0))) + delta
+            if bi is not None and isinstance(bi, int) and 0 <= bi < len(new_comps):
+                cb = new_comps[bi]
+                pb = next((p for p in getattr(cb, "ports", []) if getattr(p, "name", None) == bside), None)
+            elif isinstance(wdata.get("b_point"), dict):
+                bp = wdata["b_point"]
+                b_point = QPointF(float(bp.get("x", 0.0)), float(bp.get("y", 0.0))) + delta
+
+            w = WireItem(
+                pa, pb,
+                start_point=a_point,
+                end_point=b_point,
+                theme=getattr(sc, "theme", None),
+                route_mode=wdata.get("mode", "orth"),
+            )
+            pts = [QPointF(float(p.get("x", 0.0)), float(p.get("y", 0.0))) + delta for p in wdata.get("points", [])]
+            if pts:
+                w.set_points(pts)
+            color_hex = wdata.get("color", "")
+            if color_hex and hasattr(w, "set_wire_color"):
+                w.set_wire_color(color_hex)
+            sc.addItem(w)
+            if sc.theme and hasattr(w, "apply_theme"):
+                w.apply_theme(sc.theme)
 
     def _create_custom_component(self):
         """Open component creator dialog and reload library on success."""

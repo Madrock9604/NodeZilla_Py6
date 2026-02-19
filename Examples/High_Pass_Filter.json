@@ -1,0 +1,413 @@
+{
+  "components": [
+    {
+      "kind": "Capacitor",
+      "pos": [
+        -1200.0,
+        -300.0
+      ],
+      "rotation": 90.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "C2",
+      "value": "10nF",
+      "labels": {
+        "refdes_pos": [
+          -12.4140625,
+          -38.0
+        ],
+        "value_pos": [
+          11.038783559967442,
+          -32.16174561123216
+        ],
+        "refdes_manual": false,
+        "value_manual": true
+      }
+    },
+    {
+      "kind": "Resistor",
+      "pos": [
+        -1200.0,
+        -120.0
+      ],
+      "rotation": 90.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "R2",
+      "value": "10k",
+      "labels": {
+        "refdes_pos": [
+          -12.0078125,
+          -38.0
+        ],
+        "value_pos": [
+          12.6171875,
+          -33.0
+        ],
+        "refdes_manual": false,
+        "value_manual": true
+      }
+    },
+    {
+      "kind": "Oscope",
+      "pos": [
+        -1000.0,
+        -120.0
+      ],
+      "rotation": 90.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "O2",
+      "value": "Oscope",
+      "labels": {
+        "refdes_pos": [
+          -11.78125,
+          -12.001098659635247
+        ],
+        "value_pos": [
+          -68.0546875,
+          14.606689006079264
+        ],
+        "refdes_manual": true,
+        "value_manual": true
+      }
+    },
+    {
+      "kind": "Ground",
+      "pos": [
+        -1300.0,
+        100.0
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "GND",
+      "value": "GND",
+      "labels": {
+        "refdes_pos": [
+          -18.15625,
+          -43.625
+        ],
+        "value_pos": [
+          56.0,
+          -12.0
+        ],
+        "refdes_manual": false,
+        "value_manual": false
+      }
+    },
+    {
+      "kind": "Oscope",
+      "pos": [
+        -1500.0,
+        -240.0
+      ],
+      "rotation": 270.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": -1.0
+      },
+      "refdes": "O1",
+      "value": "Oscope",
+      "labels": {
+        "refdes_pos": [
+          16.125,
+          -38.00109865963525
+        ],
+        "value_pos": [
+          67.9453125,
+          -34.393310993920736
+        ],
+        "refdes_manual": true,
+        "value_manual": true
+      }
+    },
+    {
+      "kind": "WaveGen",
+      "pos": [
+        -1500.0,
+        -360.0
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "W1",
+      "value": "WaveGen",
+      "labels": {
+        "refdes_pos": [
+          -13.1484375,
+          -55.01406799531067
+        ],
+        "value_pos": [
+          -32.34375,
+          41.01406799531067
+        ],
+        "refdes_manual": false,
+        "value_manual": false
+      }
+    }
+  ],
+  "texts": [
+    {
+      "text": "Remember hit the play button and\nsee how it works!",
+      "pos": [
+        -848.0039246839605,
+        -494.9984668554083
+      ],
+      "style": {
+        "family": ".AppleSystemUIFont",
+        "point_size": 13,
+        "bold": false,
+        "italic": false,
+        "color": "#ebebeb",
+        "custom_color": ""
+      }
+    },
+    {
+      "text": "What is this for???!!!!\nWell has a lot of applications\nbut the most comon one is on\nradio! When you choose a\nStation Ex 79.5 Your radio makes\na filter and only allows the frequency\nof 79.5 Mega Hertz be captured by\nyour Radio!",
+      "pos": [
+        -944.8787288117121,
+        -59.169054266084416
+      ],
+      "style": {
+        "family": ".AppleSystemUIFont",
+        "point_size": 13,
+        "bold": false,
+        "italic": false,
+        "color": "#ebebeb",
+        "custom_color": ""
+      }
+    },
+    {
+      "text": "The trick here is the Resistor R2\nand Capacitor C2! Depending on\ntheir values you can select a\nfrequency point and any signal\nwith less frequency than what you\nchoosed will be filtered!",
+      "pos": [
+        -1430.7775752051048,
+        -196.63628076572468
+      ],
+      "style": {
+        "family": ".AppleSystemUIFont",
+        "point_size": 13,
+        "bold": false,
+        "italic": false,
+        "color": "#ebebeb",
+        "custom_color": ""
+      }
+    },
+    {
+      "text": "This is a High Pass Filter\nIt allows signals of high frequency pass the circuit\nwhile low frequency signals gets attenuated!",
+      "pos": [
+        -1248.939835916135,
+        -487.4257064721969
+      ],
+      "style": {
+        "family": ".AppleSystemUIFont",
+        "point_size": 13,
+        "bold": false,
+        "italic": false,
+        "color": "#ebebeb",
+        "custom_color": ""
+      }
+    }
+  ],
+  "wires": [
+    {
+      "points": [
+        {
+          "x": -1460.0,
+          "y": -220.0
+        },
+        {
+          "x": -1460.0,
+          "y": 80.0
+        },
+        {
+          "x": -1300.0,
+          "y": 80.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        4,
+        "-"
+      ],
+      "b": [
+        3,
+        "A"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -1200.0,
+          "y": -80.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        1,
+        "B"
+      ],
+      "b_point": {
+        "x": -1200.0,
+        "y": 80.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1040.0,
+          "y": -100.0073243975683
+        },
+        {
+          "x": -1040.0,
+          "y": -100.0
+        },
+        {
+          "x": -1040.0,
+          "y": 80.0
+        },
+        {
+          "x": -1200.0,
+          "y": 80.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        2,
+        "-"
+      ],
+      "b": [
+        3,
+        "A"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -1040.0,
+          "y": -140.0
+        },
+        {
+          "x": -1120.0,
+          "y": -140.0
+        },
+        {
+          "x": -1120.0,
+          "y": -200.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        2,
+        "+"
+      ],
+      "b_point": {
+        "x": -1200.0,
+        "y": -200.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1460.0,
+          "y": -260.0
+        },
+        {
+          "x": -1340.0,
+          "y": -260.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        4,
+        "+"
+      ],
+      "b_point": {
+        "x": -1340.0,
+        "y": -360.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1200.0,
+          "y": -240.0
+        },
+        {
+          "x": -1200.0,
+          "y": -200.0
+        },
+        {
+          "x": -1200.0,
+          "y": -160.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        0,
+        "B"
+      ],
+      "b": [
+        1,
+        "A"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -1460.0,
+          "y": -360.0
+        },
+        {
+          "x": -1340.0,
+          "y": -360.0
+        },
+        {
+          "x": -1200.0,
+          "y": -360.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        5,
+        "+"
+      ],
+      "b": [
+        0,
+        "A"
+      ]
+    }
+  ],
+  "settings": {
+    "grid_on": true,
+    "grid_size": 20,
+    "grid_style": "dots",
+    "snap_on": true,
+    "wire_junctions": [
+      {
+        "x": -1340.0,
+        "y": -360.0
+      },
+      {
+        "x": -1200.0,
+        "y": -200.0
+      },
+      {
+        "x": -1200.0,
+        "y": 80.0
+      }
+    ],
+    "net_names": []
+  },
+  "_format": 2
+}
