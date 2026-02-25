@@ -137,7 +137,8 @@ class ScopeWaveformWidget(QWidget):
         self._ch1_offset_v = 0.0
         self._ch2_offset_v = 0.0
         self._ch2_enabled = False
-        self.setMinimumHeight(280)
+        # Keep the plot compact enough so docking/splitting stays flexible.
+        self.setMinimumHeight(170)
 
     def set_samples(self, samples: Dict[str, List[float]]):
         self._samples = {k: list(v) for k, v in samples.items()}
@@ -369,7 +370,7 @@ class WavegenPanel(QWidget):
 
         self.notes = QTextEdit()
         self.notes.setReadOnly(True)
-        self.notes.setMinimumHeight(140)
+        self.notes.setMinimumHeight(90)
 
         layout.addWidget(title)
         layout.addWidget(desc)

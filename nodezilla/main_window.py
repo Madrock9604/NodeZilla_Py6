@@ -25,7 +25,10 @@ from .theme import ThemeWatcher
 from .component_library import load_component_library
 from .component_panel import ComponentPanel
 from .custom_component_dialog import CustomComponentDialog
-from .instruments_tab import InstrumentsTab
+from .instruments_tab import InstrumentTool, ScopePanel, SuppliesPanel, WavegenPanel
+from .discovery_backend import make_backend
+from .pl_panel import PlPanel
+from .project_explorer_panel import ProjectExplorerPanel
 from nodezilla import Program as P
 
 
@@ -168,18 +171,32 @@ class MainWindow(QMainWindow):
         self.runtime_spice_netlist_path: str = ""
         self._clipboard_payload: dict | None = None
         self._paste_serial: int = 0
+        self._pending_pl_component_id: int | None = None
 
         self.tabs = QTabWidget()
         self.status_label = QLabel("Ready")
         self.undo_stack = QUndoStack(self)
 
         self._watcher = ThemeWatcher(QApplication.instance(), self._apply_theme)
+        self.backend = make_backend()
 
         self.schematic_tab = SchematicTab(self.status_label, self.undo_stack)
         self.component_library = load_component_library()
         theme = self._watcher.current_theme()
         self._apply_theme(theme)
-        self.instruments_tab = InstrumentsTab(show_connection_strip=False)
+        self.instruments_tab = QMainWindow()
+        self.instruments_tab.setDockNestingEnabled(True)
+        self.instruments_tab.setDockOptions(
+            QMainWindow.AnimatedDocks
+            | QMainWindow.AllowNestedDocks
+            | QMainWindow.AllowTabbedDocks
+        )
+        # Keep an empty central host so Qt shows full edge docking guides
+        # (left/right/top/bottom), without a visible placeholder panel.
+        inst_center = QWidget()
+        inst_center.setObjectName("InstrumentsCenterHost")
+        inst_center.setStyleSheet("#InstrumentsCenterHost { background: transparent; }")
+        self.instruments_tab.setCentralWidget(inst_center)
         self.tabs.addTab(self.schematic_tab, "Schematic")
         self.tabs.addTab(self.instruments_tab, "Instruments")
         self.setCentralWidget(self.tabs)
@@ -213,6 +230,16 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.BottomDockWidgetArea, live_netlist_dock)
         self.live_netlist_dock = live_netlist_dock
 
+        self.pl_panel = PlPanel()
+        self.pl_panel.place_requested.connect(self._place_component_from_pl)
+        self.pl_panel.verify_requested.connect(self._verify_pl_availability)
+        pl_dock = QDockWidget("PL Components", self)
+        pl_dock.setWidget(self.pl_panel)
+        pl_dock.setObjectName("PlComponentsDock")
+        pl_dock.setAllowedAreas(Qt.RightDockWidgetArea | Qt.LeftDockWidgetArea | Qt.BottomDockWidgetArea)
+        self.addDockWidget(Qt.RightDockWidgetArea, pl_dock)
+        self.pl_dock = pl_dock
+
         self.component_panel = ComponentPanel(self.component_library)
         self.component_panel.place_requested.connect(self.schematic_tab.scene.set_mode_place)
         component_dock = QDockWidget("Components", self)
@@ -222,11 +249,24 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.LeftDockWidgetArea, component_dock)
         self.component_dock = component_dock
 
+        self.project_explorer_panel = ProjectExplorerPanel(Path.cwd())
+        self.project_explorer_panel.open_requested.connect(self._open_schematic_path)
+        project_dock = QDockWidget("Project Explorer", self)
+        project_dock.setWidget(self.project_explorer_panel)
+        project_dock.setObjectName("ProjectExplorerDock")
+        project_dock.setAllowedAreas(Qt.RightDockWidgetArea | Qt.LeftDockWidgetArea)
+        self.addDockWidget(Qt.LeftDockWidgetArea, project_dock)
+        self.project_explorer_dock = project_dock
+        self.tabifyDockWidget(self.component_dock, self.project_explorer_dock)
+        self.component_dock.raise_()
+
         self.schematic_tab.scene.request_properties = self._show_properties_for
         self.schematic_tab.scene.selectionChanged.connect(self._on_selection_changed)
+        self.schematic_tab.scene.component_placed.connect(self._on_component_placed)
 
         self._build_toolbar()
         self._build_schematic_island()
+        self._build_instrument_docks()
         self._build_menu()
         self._build_schematic_shortcuts()
 
@@ -234,21 +274,30 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.props_dock.toggleViewAction())
         view_menu.addAction(self.nets_dock.toggleViewAction())
         view_menu.addAction(self.component_dock.toggleViewAction())
+        view_menu.addAction(self.project_explorer_dock.toggleViewAction())
         view_menu.addAction(self.live_netlist_dock.toggleViewAction())
+        view_menu.addAction(self.pl_dock.toggleViewAction())
+        view_menu.addAction(self.scope_dock.toggleViewAction())
+        view_menu.addAction(self.wavegen_dock.toggleViewAction())
+        view_menu.addAction(self.supplies_dock.toggleViewAction())
 
         # Keep schematic-only docks hidden when Instruments tab is active.
         self._schematic_dock_visibility = {
             "props": self.props_dock.isVisible(),
             "nets": self.nets_dock.isVisible(),
             "components": self.component_dock.isVisible(),
+            "project_explorer": self.project_explorer_dock.isVisible(),
             "live_netlist": self.live_netlist_dock.isVisible(),
+            "pl": self.pl_dock.isVisible(),
         }
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self._on_tab_changed(self.tabs.currentIndex())
-        self.instruments_tab.backend.connection_changed.connect(self._on_backend_connection_changed)
+        self.backend.connection_changed.connect(self._on_backend_connection_changed)
         self._refresh_hardware_devices()
         self.schematic_tab.scene.nets_changed.connect(self._refresh_live_spice_panel)
+        self.schematic_tab.scene.nets_changed.connect(self._refresh_pl_used_flags)
         self._refresh_live_spice_panel()
+        self._refresh_pl_used_flags()
 
         edit_menu = self.menuBar().addMenu("Edit")
         undo_act = self.undo_stack.createUndoAction(self, "Undo")
@@ -296,21 +345,37 @@ class MainWindow(QMainWindow):
                 self.component_dock.show()
             else:
                 self.component_dock.hide()
+            if self._schematic_dock_visibility.get("project_explorer", True):
+                self.project_explorer_dock.show()
+            else:
+                self.project_explorer_dock.hide()
             if self._schematic_dock_visibility.get("live_netlist", True):
                 self.live_netlist_dock.show()
             else:
                 self.live_netlist_dock.hide()
+            if self._schematic_dock_visibility.get("pl", True):
+                self.pl_dock.show()
+            else:
+                self.pl_dock.hide()
+            self.scope_dock.hide()
+            self.wavegen_dock.hide()
+            self.supplies_dock.hide()
             return
 
         # Snapshot current schematic dock visibility, then hide all of them.
         self._schematic_dock_visibility["props"] = self.props_dock.isVisible()
         self._schematic_dock_visibility["nets"] = self.nets_dock.isVisible()
         self._schematic_dock_visibility["components"] = self.component_dock.isVisible()
+        self._schematic_dock_visibility["project_explorer"] = self.project_explorer_dock.isVisible()
         self._schematic_dock_visibility["live_netlist"] = self.live_netlist_dock.isVisible()
+        self._schematic_dock_visibility["pl"] = self.pl_dock.isVisible()
         self.props_dock.hide()
         self.nets_dock.hide()
         self.component_dock.hide()
+        self.project_explorer_dock.hide()
         self.live_netlist_dock.hide()
+        self.pl_dock.hide()
+        self._apply_default_instrument_layout()
 
     # selection → props
     def _on_selection_changed(self):
@@ -326,6 +391,114 @@ class MainWindow(QMainWindow):
             return
         comps = [it for it in self.schematic_tab.scene.selectedItems() if isinstance(it, ComponentItem)]
         self.props_panel.show_component(comps[0] if comps else None)
+
+    def _resolve_library_kind_for_pl(self, pl_type: str, pl_name: str, value_or_part: str) -> str | None:
+        lib = load_component_library(force_reload=True)
+        by_kind = {c.kind.lower(): c.kind for c in lib.all()}
+        by_display = {c.display_name.lower(): c.kind for c in lib.all()}
+
+        def pick(*candidates: str) -> str | None:
+            for c in candidates:
+                key = str(c or "").strip().lower()
+                if not key:
+                    continue
+                if key in by_kind:
+                    return by_kind[key]
+                if key in by_display:
+                    return by_display[key]
+            return None
+
+        t = str(pl_type or "").strip().lower()
+        # Prefer explicit part/model name when provided.
+        part_kind = pick(value_or_part)
+        if part_kind is not None:
+            return part_kind
+        if t == "resistor":
+            return pick("Resistor")
+        if t == "capacitor":
+            return pick("Capacitor")
+        if t == "inductor":
+            return pick("Inductor")
+        if t == "diode":
+            return pick("Diode")
+        if t == "instrument":
+            return pick(value_or_part, pl_name, "WaveGen", "Oscope")
+        return pick(pl_type, pl_name, value_or_part)
+
+    def _place_component_from_pl(self, payload: dict):
+        pl_type = str(payload.get("type", "")).strip()
+        pl_name = str(payload.get("name", "")).strip()
+        value_or_part = str(payload.get("value_or_part", "")).strip()
+        comp_id = int(payload.get("id", -1))
+        kind = self._resolve_library_kind_for_pl(pl_type, pl_name, value_or_part)
+        if not kind:
+            QMessageBox.warning(
+                self,
+                "Component not found",
+                (
+                    f'PL row ID {comp_id} ({pl_type} {pl_name}) is not in the component library.\n'
+                    "Add this component to the library before placing it."
+                ),
+            )
+            return
+        self.tabs.setCurrentWidget(self.schematic_tab)
+        self.schematic_tab.scene.set_mode_place(kind)
+        self.schematic_tab.scene.set_place_overrides(refdes=pl_name, value=value_or_part)
+        self._pending_pl_component_id = comp_id
+        self.statusBar().showMessage(
+            f"PL row {comp_id} selected: place {kind} as {pl_name}",
+            4000,
+        )
+
+    def _on_component_placed(self, _comp: ComponentItem):
+        self._refresh_pl_used_flags()
+        self._pending_pl_component_id = None
+
+    def _refresh_pl_used_flags(self):
+        comps = [it for it in self.schematic_tab.scene.items() if isinstance(it, ComponentItem)]
+        if hasattr(self, "pl_panel") and self.pl_panel is not None:
+            self.pl_panel.sync_used_from_components(comps)
+
+    def _verify_pl_availability(self):
+        if not hasattr(self, "pl_panel") or self.pl_panel is None:
+            return
+        comps = [it for it in self.schematic_tab.scene.items() if isinstance(it, ComponentItem)]
+        placed_counts = {}
+        placed_refs = {}
+        for c in comps:
+            if not self.pl_panel.is_physical_component(c):
+                continue
+            sig = self.pl_panel.component_signature(c)
+            placed_counts[sig] = int(placed_counts.get(sig, 0)) + 1
+            placed_refs.setdefault(sig, []).append(str(getattr(c, "refdes", "")).strip() or "?")
+
+        shortages = []
+        for sig, placed in placed_counts.items():
+            requested = int(self.pl_panel.requested_count_for_signature(sig))
+            missing = placed - requested
+            if missing > 0:
+                shortages.append((sig, requested, placed, missing, placed_refs.get(sig, [])))
+
+        if not shortages:
+            QMessageBox.information(
+                self,
+                "PL availability",
+                "All currently placed components can be fulfilled by the PL configuration.",
+            )
+            return
+
+        lines = ["Current PL configuration cannot fulfill these placed components:", ""]
+        for sig, requested, placed, missing, refs in sorted(
+            shortages, key=lambda x: (str(x[0][0]), str(x[0][1]))
+        ):
+            t_name = str(sig[0] or "component")
+            val = sig[1][1] if isinstance(sig[1], tuple) and len(sig[1]) > 1 else sig[1]
+            shown_refs = ", ".join(refs[:8]) + ("..." if len(refs) > 8 else "")
+            lines.append(
+                f"- {t_name} | value/part={val} | requested={requested}, placed={placed}, missing={missing} "
+                f"| refs: {shown_refs}"
+            )
+        QMessageBox.warning(self, "PL availability warning", "\n".join(lines))
 
     def _apply_properties(
         self,
@@ -385,7 +558,7 @@ class MainWindow(QMainWindow):
         self.hw_connect_btn = QPushButton("Connect")
         self.hw_disconnect_btn = QPushButton("Disconnect")
         self.hw_disconnect_btn.setEnabled(False)
-        self.hw_backend = QLabel(f"Backend: {self.instruments_tab.backend.backend_name()}")
+        self.hw_backend = QLabel(f"Backend: {self.backend.backend_name()}")
 
         tb.addWidget(self.hw_status)
         tb.addSeparator()
@@ -402,7 +575,7 @@ class MainWindow(QMainWindow):
         self.hw_disconnect_btn.clicked.connect(self._disconnect_hardware)
 
     def _refresh_hardware_devices(self):
-        backend = self.instruments_tab.backend
+        backend = self.backend
         connected = backend.connected_device()
         self.hw_devices.clear()
         devices = backend.list_devices()
@@ -436,21 +609,24 @@ class MainWindow(QMainWindow):
         if self.hw_devices.count() == 0 or not self.hw_devices.isEnabled():
             return
         dev = self.hw_devices.currentText()
-        ok, msg = self.instruments_tab.backend.connect_device(dev)
+        ok, msg = self.backend.connect_device(dev)
         self.hw_status.setText(f"Hardware: {msg}")
         if ok:
             self._refresh_hardware_devices()
 
     def _disconnect_hardware(self):
-        ok, msg = self.instruments_tab.backend.disconnect_device()
+        ok, msg = self.backend.disconnect_device()
         self.hw_status.setText(f"Hardware: {msg}")
         if ok:
             self._refresh_hardware_devices()
 
     def _on_backend_connection_changed(self, _connected: bool, message: str):
         self.hw_status.setText(f"Hardware: {message}")
+        for p in (self.scope_panel, self.wavegen_panel, self.supplies_panel):
+            if hasattr(p, "on_connection_changed"):
+                p.on_connection_changed()
         if _connected:
-            backend = self.instruments_tab.backend
+            backend = self.backend
             ok, _msg, st = backend.read_supplies_status()
             tracking = bool(st.get("tracking", False)) if ok else False
             power_limit_w = float(st.get("power_limit_w", 2.5)) if ok else 2.5
@@ -461,9 +637,28 @@ class MainWindow(QMainWindow):
                 tracking=tracking,
                 power_limit_w=power_limit_w,
             )
-            if hasattr(self.instruments_tab, "sync_supplies_panels"):
-                self.instruments_tab.sync_supplies_panels()
+            self._sync_supplies_docks()
         self._refresh_hardware_devices()
+
+    def _sync_supplies_docks(self):
+        if hasattr(self, "supplies_panel") and self.supplies_panel is not None:
+            if hasattr(self.supplies_panel, "sync_from_backend"):
+                self.supplies_panel.sync_from_backend()
+
+    def _shutdown_instrument_panels(self):
+        for p in (getattr(self, "scope_panel", None), getattr(self, "wavegen_panel", None), getattr(self, "supplies_panel", None)):
+            if p is None:
+                continue
+            if hasattr(p, "shutdown"):
+                try:
+                    p.shutdown()
+                except Exception:
+                    pass
+        try:
+            if self.backend.connected_device() is not None:
+                self.backend.disconnect_device()
+        except Exception:
+            pass
 
     def _install_component_shortcuts(self):
         """Build dynamic placement shortcuts from component library metadata."""
@@ -480,6 +675,111 @@ class MainWindow(QMainWindow):
             )
             self.addAction(act)
             self._component_shortcut_actions.append(act)
+
+    def _build_instrument_docks(self):
+        """Create dockable instrument panels (Wavegen/Scope/Supplies)."""
+        scope_tool = InstrumentTool("scope", "Scope", "Capture and inspect analog waveforms.")
+        wavegen_tool = InstrumentTool("wavegen", "Wavegen", "Generate analog stimulus signals.")
+        supplies_tool = InstrumentTool("supplies", "Supplies", "Control programmable power rails.")
+
+        self.scope_panel = ScopePanel(scope_tool, self.backend)
+        self.wavegen_panel = WavegenPanel(wavegen_tool, self.backend)
+        self.supplies_panel = SuppliesPanel(supplies_tool, self.backend)
+
+        self.scope_dock = QDockWidget("Scope", self)
+        self.scope_dock.setObjectName("ScopeDock")
+        self.scope_dock.setWidget(self.scope_panel)
+        self.scope_dock.setAllowedAreas(
+            Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea | Qt.TopDockWidgetArea
+        )
+        self.scope_dock.setFeatures(
+            QDockWidget.DockWidgetMovable
+            | QDockWidget.DockWidgetFloatable
+        )
+        self.scope_dock.setMinimumSize(280, 180)
+
+        self.wavegen_dock = QDockWidget("Wavegen", self)
+        self.wavegen_dock.setObjectName("WavegenDock")
+        self.wavegen_dock.setWidget(self.wavegen_panel)
+        self.wavegen_dock.setAllowedAreas(
+            Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea | Qt.TopDockWidgetArea
+        )
+        self.wavegen_dock.setFeatures(
+            QDockWidget.DockWidgetMovable
+            | QDockWidget.DockWidgetFloatable
+        )
+        self.wavegen_dock.setMinimumSize(260, 160)
+
+        self.supplies_dock = QDockWidget("Supplies", self)
+        self.supplies_dock.setObjectName("SuppliesDock")
+        self.supplies_dock.setWidget(self.supplies_panel)
+        self.supplies_dock.setAllowedAreas(
+            Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea | Qt.TopDockWidgetArea
+        )
+        self.supplies_dock.setFeatures(
+            QDockWidget.DockWidgetMovable
+            | QDockWidget.DockWidgetFloatable
+        )
+        self.supplies_dock.setMinimumSize(260, 160)
+        self._apply_default_instrument_layout()
+
+    def _apply_default_instrument_layout(self):
+        """Force default instruments layout:
+        scope top, wavegen+supplies bottom split.
+        """
+        for d in (self.scope_dock, self.wavegen_dock, self.supplies_dock):
+            if d.isFloating():
+                d.setFloating(False)
+        self.instruments_tab.addDockWidget(Qt.TopDockWidgetArea, self.scope_dock)
+        self.instruments_tab.addDockWidget(Qt.BottomDockWidgetArea, self.wavegen_dock)
+        self.instruments_tab.addDockWidget(Qt.BottomDockWidgetArea, self.supplies_dock)
+        self.instruments_tab.splitDockWidget(self.wavegen_dock, self.supplies_dock, Qt.Horizontal)
+        self.scope_dock.show()
+        self.wavegen_dock.show()
+        self.supplies_dock.show()
+        preset = self._instrument_layout_preset()
+        # Proportional sizing: scope gets more vertical space.
+        self.instruments_tab.resizeDocks(
+            [self.scope_dock, self.wavegen_dock],
+            [int(preset["v_top"]), int(preset["v_bottom"])],
+            Qt.Vertical,
+        )
+        # Bottom split: wavegen and supplies proportional by preset.
+        self.instruments_tab.resizeDocks(
+            [self.wavegen_dock, self.supplies_dock],
+            [int(preset["h_left"]), int(preset["h_right"])],
+            Qt.Horizontal,
+        )
+        self.scope_dock.raise_()
+
+    def _instrument_layout_preset(self) -> dict:
+        """Return dock-size preset tuned for current window size."""
+        w = max(1, int(self.instruments_tab.width()))
+        h = max(1, int(self.instruments_tab.height()))
+        area = w * h
+        # Small screens / compact windows.
+        if w < 1300 or h < 760 or area < 900_000:
+            return {
+                "v_top": max(240, int(h * 0.58)),
+                "v_bottom": max(180, int(h * 0.42)),
+                "h_left": max(260, int(w * 0.55)),
+                "h_right": max(220, int(w * 0.45)),
+            }
+        # Large monitors.
+        if w > 2200 or h > 1300 or area > 2_600_000:
+            return {
+                "v_top": max(340, int(h * 0.66)),
+                "v_bottom": max(230, int(h * 0.34)),
+                "h_left": max(420, int(w * 0.60)),
+                "h_right": max(320, int(w * 0.40)),
+            }
+        # Medium default.
+        return {
+            "v_top": max(300, int(h * 0.63)),
+            "v_bottom": max(210, int(h * 0.37)),
+            "h_left": max(340, int(w * 0.58)),
+            "h_right": max(280, int(w * 0.42)),
+        }
 
     def _handle_component_shortcut(self, kind: str, shortcut: str):
         """Resolve conflicts between placement hotkeys and component shortcuts."""
@@ -1096,7 +1396,7 @@ class MainWindow(QMainWindow):
         - self.runtime_spice_netlist_text
         - self.runtime_spice_netlist_path
         """
-        backend = self.instruments_tab.backend
+        backend = self.backend
         sc = self.schematic_tab.scene
         if backend.connected_device() is None:
             QMessageBox.warning(self, "Device required", "Connect a device first.")
@@ -1144,7 +1444,7 @@ class MainWindow(QMainWindow):
 
     def _enforce_runtime_supplies(self) -> bool:
         """Silently enforce runtime rail targets and wait for lock (+5V/-5V)."""
-        backend = self.instruments_tab.backend
+        backend = self.backend
         target_vp = 5.0
         target_vn = -5.0
         tol = 0.05
@@ -1174,8 +1474,7 @@ class MainWindow(QMainWindow):
                     break
             time.sleep(poll_s)
 
-        if hasattr(self.instruments_tab, "sync_supplies_panels"):
-            self.instruments_tab.sync_supplies_panels()
+        self._sync_supplies_docks()
         return locked
 
 
@@ -1184,14 +1483,19 @@ class MainWindow(QMainWindow):
         """Load schematic JSON from disk into scene."""
         path, _ = QFileDialog.getOpenFileName(self, "Open schematic", filter="Schematic (*.json)")
         if path:
-            try:
-                with open(path, 'r') as f:
-                    data = json.load(f)
-                self.schematic_tab.scene.load(data)
-                self._grid_spin.setValue(self.schematic_tab.scene.grid_size)
-                self.statusBar().showMessage(f"Loaded {path}", 4000)
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to load: {e}")
+            self._open_schematic_path(path)
+
+    def _open_schematic_path(self, path: str):
+        """Load schematic JSON from an explicit path."""
+        try:
+            with open(path, 'r') as f:
+                data = json.load(f)
+            self.tabs.setCurrentWidget(self.schematic_tab)
+            self.schematic_tab.scene.load(data)
+            self._grid_spin.setValue(self.schematic_tab.scene.grid_size)
+            self.statusBar().showMessage(f"Loaded {path}", 4000)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load: {e}")
 
     def _save(self):
         """Serialize scene JSON and save to disk."""
@@ -1208,9 +1512,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """Graceful app shutdown: stop instruments, disconnect hardware, clean temp files."""
         try:
-            if hasattr(self, "instruments_tab") and self.instruments_tab is not None:
-                if hasattr(self.instruments_tab, "shutdown"):
-                    self.instruments_tab.shutdown()
+            self._shutdown_instrument_panels()
         except Exception:
             # Best-effort shutdown; never block close.
             pass

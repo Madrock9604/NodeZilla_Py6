@@ -26,6 +26,7 @@ except Exception:
 
 class SchematicScene(QGraphicsScene):
     nets_changed = Signal()
+    component_placed = Signal(object)
 
     class Mode:
         SELECT = 0; PLACE = 1; WIRE = 2
@@ -62,6 +63,8 @@ class SchematicScene(QGraphicsScene):
         self._net_update_pending = False
         self.changed.connect(self._schedule_nets_changed)
         self.wire_route_mode = "orth"  # orth | free | 45
+        self._place_refdes_override: str = ""
+        self._place_value_override: str = ""
 
 
     def apply_theme(self, theme: "Theme"):
@@ -166,6 +169,7 @@ class SchematicScene(QGraphicsScene):
     def set_mode_select(self):
         self.mode = SchematicScene.Mode.SELECT
         self.component_to_place = None
+        self.clear_place_overrides()
         self._remove_ghost()
         if self._view: self._view.setDragMode(QGraphicsView.RubberBandDrag)
         self.status_label.setText("Arrow: select/move")
@@ -184,6 +188,14 @@ class SchematicScene(QGraphicsScene):
             self.status_label.setText(
                 f"Place: {kind} (next {self._next_refdes(kind)}) – click to place, ESC to cancel, [ / ] to rotate"
             )
+
+    def set_place_overrides(self, *, refdes: str = "", value: str = ""):
+        self._place_refdes_override = str(refdes or "").strip()
+        self._place_value_override = str(value or "").strip()
+
+    def clear_place_overrides(self):
+        self._place_refdes_override = ""
+        self._place_value_override = ""
 
     def set_mode_wire(self):
         self.mode = SchematicScene.Mode.WIRE
@@ -695,7 +707,8 @@ class SchematicScene(QGraphicsScene):
                 theme = getattr(self, "theme", None)
                 if theme and hasattr(comp, "apply_theme"):
                     comp.apply_theme(theme)
-                comp.set_refdes(self._next_refdes(self.component_to_place))
+                forced_refdes = (self._place_refdes_override or "").strip()
+                comp.set_refdes(forced_refdes if forced_refdes else self._next_refdes(self.component_to_place))
                 comp_def = load_component_library().get(self.component_to_place)
                 if comp_def and getattr(comp_def, "comp_type", "component") == "net":
                     if comp_def.net_name:
@@ -708,6 +721,9 @@ class SchematicScene(QGraphicsScene):
                         if "part" in label or comp_def.spice_type.upper() in {"D", "Q", "U", "X"}:
                             if comp_def.display_name:
                                 comp.set_value(comp_def.display_name)
+                forced_value = (self._place_value_override or "").strip()
+                if forced_value:
+                    comp.set_value(forced_value)
                 self.undo_stack.push(AddComponentCommand(self, comp))
                 self._bump_refseq(self.component_to_place)
                 if self._ghost_item:
@@ -716,6 +732,8 @@ class SchematicScene(QGraphicsScene):
                         ms = self._ghost_item.mirror_state()
                         comp.set_mirror(ms.get("mx", 1.0), ms.get("my", 1.0))
                 self.status_label.setText(f"Placed {comp.refdes} ({self.component_to_place}) at {pos.x():.0f},{pos.y():.0f}")
+                self.component_placed.emit(comp)
+                self.clear_place_overrides()
                 e.accept(); return
             elif e.button() == Qt.RightButton:
                 self.set_mode_select(); e.accept(); return
