@@ -42,6 +42,7 @@ class SchematicScene(QGraphicsScene):
         self._ghost_kind: Optional[str] = None; self._ghost_item: Optional[ComponentItem] = None
         self._view = None
         self.request_properties = None
+        self.request_open_chip = None
         self.undo_stack = undo_stack
         self._refseq: Dict[str, int] = {}
         self.theme: Theme | None = None
@@ -65,6 +66,7 @@ class SchematicScene(QGraphicsScene):
         self.wire_route_mode = "orth"  # orth | free | 45
         self._place_refdes_override: str = ""
         self._place_value_override: str = ""
+        self._place_chip_io: dict | None = None
 
 
     def apply_theme(self, theme: "Theme"):
@@ -169,6 +171,7 @@ class SchematicScene(QGraphicsScene):
     def set_mode_select(self):
         self.mode = SchematicScene.Mode.SELECT
         self.component_to_place = None
+        self._place_chip_io = None
         self.clear_place_overrides()
         self._remove_ghost()
         if self._view: self._view.setDragMode(QGraphicsView.RubberBandDrag)
@@ -177,6 +180,7 @@ class SchematicScene(QGraphicsScene):
     def set_mode_place(self, kind: str):
         self.mode = SchematicScene.Mode.PLACE
         self.component_to_place = kind
+        self._place_chip_io = None
         self._remove_ghost(); self._ghost_kind = kind; self._ensure_ghost()
         if self._view: self._view.setDragMode(QGraphicsView.NoDrag)
         comp_def = load_component_library().get(kind)
@@ -188,6 +192,15 @@ class SchematicScene(QGraphicsScene):
             self.status_label.setText(
                 f"Place: {kind} (next {self._next_refdes(kind)}) – click to place, ESC to cancel, [ / ] to rotate"
             )
+
+    def set_mode_place_chip(self, pins: int):
+        self.set_mode_place("Chip")
+        self._place_chip_io = {"pins": max(2, int(pins))}
+        if self._ghost_item is not None and hasattr(self._ghost_item, "configure_chip_pins"):
+            self._ghost_item.configure_chip_pins(self._place_chip_io["pins"])
+        self.status_label.setText(
+            f"Place Chip ({self._place_chip_io['pins']} pins) – click to place, ESC to cancel"
+        )
 
     def set_place_overrides(self, *, refdes: str = "", value: str = ""):
         self._place_refdes_override = str(refdes or "").strip()
@@ -704,6 +717,12 @@ class SchematicScene(QGraphicsScene):
                     else:
                         pos = self._snap_point(scene_pos)
                 comp = ComponentItem(self.component_to_place, pos)
+                if (
+                    self.component_to_place == "Chip"
+                    and isinstance(self._place_chip_io, dict)
+                    and hasattr(comp, "configure_chip_pins")
+                ):
+                    comp.configure_chip_pins(int(self._place_chip_io.get("pins", 2)))
                 theme = getattr(self, "theme", None)
                 if theme and hasattr(comp, "apply_theme"):
                     comp.apply_theme(theme)
@@ -734,6 +753,7 @@ class SchematicScene(QGraphicsScene):
                 self.status_label.setText(f"Placed {comp.refdes} ({self.component_to_place}) at {pos.x():.0f},{pos.y():.0f}")
                 self.component_placed.emit(comp)
                 self.clear_place_overrides()
+                self._place_chip_io = None
                 e.accept(); return
             elif e.button() == Qt.RightButton:
                 self.set_mode_select(); e.accept(); return
@@ -1159,6 +1179,10 @@ class SchematicScene(QGraphicsScene):
             'refdes': c.refdes,
             'value': c.value,
             'labels': c.labels_state() if hasattr(c, "labels_state") else {},
+            'chip': c.chip_data() if hasattr(c, "chip_data") else {},
+            'chip_io': {
+                'pins': c.chip_pin_count(),
+            } if hasattr(c, "chip_io_counts") and getattr(c, "is_chip", lambda: False)() else {},
         } for c in comps],
         'texts': [
             {
@@ -1204,10 +1228,21 @@ class SchematicScene(QGraphicsScene):
         for cdata in data.get('components', []):
             kind = cdata['kind']; x, y = cdata['pos']; rot = cdata.get('rotation', 0)
             c = ComponentItem(kind, QPointF(x, y)); c.setRotation(rot)
+            if kind == "Chip" and hasattr(c, "configure_chip_pins"):
+                io = cdata.get("chip_io", {})
+                if "pins" in io:
+                    c.configure_chip_pins(int(io.get("pins", 2) or 2))
+                else:
+                    # Backward compatibility with older files.
+                    ins = int(io.get("inputs", 2) or 2)
+                    outs = int(io.get("outputs", 2) or 2)
+                    c.configure_chip_pins(max(2, ins + outs))
             mirror = cdata.get("mirror", {})
             if hasattr(c, "set_mirror"):
                 c.set_mirror(float(mirror.get("mx", 1.0)), float(mirror.get("my", 1.0)))
             c.set_refdes(cdata.get('refdes', "")); c.set_value(cdata.get('value', ""))
+            if hasattr(c, "set_chip_data"):
+                c.set_chip_data(cdata.get("chip", {}))
             if self.theme and hasattr(c, "apply_theme"):
                 c.apply_theme(self.theme)
             if hasattr(c, "apply_labels_state"):

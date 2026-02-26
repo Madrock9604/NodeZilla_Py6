@@ -1,0 +1,23 @@
+{
+  "kind": "Chip",
+  "display_name": "Chip",
+  "category": "Hierarchy",
+  "prefix": "U",
+  "spice_type": "X",
+  "value_label": "Part Number",
+  "show_value": true,
+  "default_value": "Chip",
+  "shortcut": "",
+  "type": "component",
+  "is_chip": true,
+  "visible": false,
+  "symbol": "defaults/chip.json",
+  "auto_align_terminals": false,
+  "auto_scale_symbol": false,
+  "ports": [
+    {"name": "In1", "x": -50, "y": -20},
+    {"name": "In2", "x": -50, "y": 20},
+    {"name": "Out1", "x": 50, "y": -20},
+    {"name": "Out2", "x": 50, "y": 20}
+  ]
+}

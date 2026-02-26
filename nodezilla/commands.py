@@ -122,6 +122,31 @@ class RotateComponentCommand(QUndoCommand):
         self.comp.setRotation(self.old); self._refresh()
 
 
+class MirrorComponentCommand(QUndoCommand):
+    """Undoable component mirror (X/Y) with wire/label refresh."""
+    def __init__(self, comp: ComponentItem, old_mirror: tuple[float, float], new_mirror: tuple[float, float]):
+        super().__init__(f"Mirror {comp.refdes or comp.kind}")
+        self.comp = comp
+        self.old = (float(old_mirror[0]), float(old_mirror[1]))
+        self.new = (float(new_mirror[0]), float(new_mirror[1]))
+
+    def _refresh(self):
+        for port in ([p for p in getattr(self.comp, 'ports', []) if p is not None] or [p for p in (getattr(self.comp, 'port_left', None), getattr(self.comp, 'port_right', None)) if p is not None]):
+            for w in list(port.wires):
+                w.update_path()
+        self.comp._update_label()
+
+    def redo(self):
+        if hasattr(self.comp, "set_mirror"):
+            self.comp.set_mirror(self.new[0], self.new[1])
+            self._refresh()
+
+    def undo(self):
+        if hasattr(self.comp, "set_mirror"):
+            self.comp.set_mirror(self.old[0], self.old[1])
+            self._refresh()
+
+
 class DeleteItemsCommand(QUndoCommand):
     """Delete selected components/wires with proper dependency ordering."""
     def __init__(self, scene, selected_items):

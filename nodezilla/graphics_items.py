@@ -230,6 +230,7 @@ class ComponentItem(QGraphicsRectItem):
         # separate draggable labels
         self.refdes_label = InlineLabel(self, "refdes")
         self.value_label = InlineLabel(self, "value")
+        self.pin_labels: List[QGraphicsTextItem] = []
 
         # symbol
         self.symbol_item: QGraphicsPathItem | None = None
@@ -237,6 +238,8 @@ class ComponentItem(QGraphicsRectItem):
         # ports
         self.ports: List[PortItem] = []
         self._comp_def = load_component_library().get(self.kind)
+        self._is_chip = bool(self._comp_def and getattr(self._comp_def, "is_chip", False))
+        self._chip_data: dict = {}
         self._auto_align_terminals = bool(getattr(self._comp_def, "auto_align_terminals", True))
         self._auto_scale_symbol = bool(getattr(self._comp_def, "auto_scale_symbol", True))
         if self._comp_def and self._comp_def.ports:
@@ -252,6 +255,10 @@ class ComponentItem(QGraphicsRectItem):
 
         self.port_left = self.ports[0] if self.ports else None
         self.port_right = self.ports[1] if len(self.ports) > 1 else None
+        if self._is_chip and self._comp_def and getattr(self._comp_def, "chip_template", ""):
+            self._chip_data = self._load_chip_template(getattr(self._comp_def, "chip_template", ""))
+        if self._is_chip and "io" not in self._chip_data:
+            self._chip_data["io"] = {"pins": max(2, len(self.ports))}
 
         # initial position + labels
         self.setPos(init_pos)
@@ -268,6 +275,32 @@ class ComponentItem(QGraphicsRectItem):
 
         # for undoable moves
         self._press_pos: Optional[QPointF] = None
+
+    def _load_chip_template(self, rel_path: str) -> dict:
+        try:
+            root = Path(__file__).resolve().parent.parent
+            p = (root / "assets" / "chips" / str(rel_path).replace("\\", "/")).resolve()
+            data = json.loads(p.read_text()) if p.exists() else {}
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _replace_ports(self, port_defs: list[tuple[str, QPointF]]):
+        # Ports are child items; replacing them is safe before wiring.
+        old_ports = list(getattr(self, "ports", []))
+        for p in old_ports:
+            try:
+                if p.scene() is not None:
+                    p.scene().removeItem(p)
+            except Exception:
+                pass
+        self.ports = [PortItem(self, name, pos) for (name, pos) in port_defs]
+        self.port_left = self.ports[0] if self.ports else None
+        self.port_right = self.ports[1] if len(self.ports) > 1 else None
+        self.prepareGeometryChange()
+        self.update()
+        self._update_label()
+        self._update_pin_labels()
 
     def set_mirror(self, mirror_x: float, mirror_y: float):
         self._mirror_x = -1.0 if mirror_x < 0 else 1.0
@@ -348,9 +381,54 @@ class ComponentItem(QGraphicsRectItem):
                     QPointF(-self.value_label.boundingRect().width() / 2, br.bottom() + 4)
                 )
 
-        # Keep text upright while component rotates.
-        self.refdes_label.setRotation(-self.rotation())
-        self.value_label.setRotation(-self.rotation())
+        # Keep text upright/readable for both rotation and mirroring.
+        label_tf = QTransform()
+        label_tf.rotate(-self.rotation())
+        label_tf.scale(self._mirror_x, self._mirror_y)
+        self.refdes_label.setRotation(0.0)
+        self.value_label.setRotation(0.0)
+        self.refdes_label.setTransform(label_tf)
+        self.value_label.setTransform(label_tf)
+        self._update_pin_labels()
+
+    def _update_pin_labels(self):
+        # Only show per-pin numbering labels for chip boundary ports.
+        for lbl in getattr(self, "pin_labels", []):
+            try:
+                if lbl.scene() is not None:
+                    lbl.scene().removeItem(lbl)
+            except Exception:
+                pass
+        self.pin_labels = []
+        if not self.is_chip():
+            return
+
+        from PySide6.QtWidgets import QApplication
+        sc = self.scene()
+        text_color = (getattr(sc, "theme", None).text if getattr(sc, "theme", None) is not None
+                      else QApplication.instance().palette().text().color())
+        label_tf = QTransform()
+        label_tf.rotate(-self.rotation())
+        label_tf.scale(self._mirror_x, self._mirror_y)
+        for p in getattr(self, "ports", []):
+            if p is None:
+                continue
+            t = QGraphicsTextItem(str(getattr(p, "name", "")), self)
+            t.setDefaultTextColor(text_color)
+            t.setZValue(4)
+            t.setFlag(QGraphicsItem.ItemIsSelectable, False)
+            t.setFlag(QGraphicsItem.ItemIsMovable, False)
+            t.setRotation(0.0)
+            t.setTransform(label_tf)
+            br = t.boundingRect()
+            # Place pin number outward from pin side.
+            if p.pos().x() <= 0:
+                x = p.pos().x() - br.width() - 8
+            else:
+                x = p.pos().x() + 8
+            y = p.pos().y() - br.height() / 2.0
+            t.setPos(QPointF(x, y))
+            self.pin_labels.append(t)
 
     def set_refdes(self, refdes: str):
         self.refdes = refdes
@@ -363,6 +441,92 @@ class ComponentItem(QGraphicsRectItem):
             sc = self.scene()
             if sc and hasattr(sc, "_schedule_nets_changed"):
                 sc._schedule_nets_changed()
+
+    def is_chip(self) -> bool:
+        return bool(self._is_chip)
+
+    def chip_data(self) -> dict:
+        try:
+            return json.loads(json.dumps(self._chip_data or {}))
+        except Exception:
+            return {}
+
+    def set_chip_data(self, data: dict):
+        prev_io = (self._chip_data or {}).get("io", {})
+        if isinstance(data, dict):
+            try:
+                self._chip_data = json.loads(json.dumps(data))
+            except Exception:
+                self._chip_data = {}
+        else:
+            self._chip_data = {}
+        # Keep chip boundary pin configuration stable across editor open/close.
+        if isinstance(prev_io, dict) and prev_io:
+            self._chip_data = dict(self._chip_data or {})
+            self._chip_data["io"] = dict(prev_io)
+
+    def configure_chip_ports(self, inputs: int, outputs: int):
+        """Backward-compatible helper (old API)."""
+        self.configure_chip_pins(int(inputs) + int(outputs))
+
+    def configure_chip_pins(self, pins: int):
+        """Define chip boundary pins as numbered connectors: 1..N."""
+        if not self.is_chip():
+            return
+        n = max(2, int(pins or 2))
+        self._chip_data = dict(self._chip_data or {})
+        self._chip_data["io"] = {"pins": n}
+
+        def spread_y(count: int) -> list[float]:
+            if count <= 1:
+                return [0.0]
+            span = max(40.0, (count - 1) * 16.0)
+            top = -span / 2.0
+            step = span / float(count - 1)
+            return [top + i * step for i in range(count)]
+
+        left_n = (n + 1) // 2
+        right_n = n - left_n
+        port_defs: list[tuple[str, QPointF]] = []
+        idx = 1
+        for y in spread_y(left_n):
+            port_defs.append((str(idx), QPointF(-COMP_WIDTH / 2, y)))
+            idx += 1
+        for y in spread_y(right_n):
+            port_defs.append((str(idx), QPointF(COMP_WIDTH / 2, y)))
+            idx += 1
+        self._replace_ports(port_defs)
+
+    def chip_io_counts(self) -> tuple[int, int]:
+        io = (self._chip_data or {}).get("io", {})
+        try:
+            if "pins" in io:
+                n = max(2, int(io.get("pins", 2)))
+                left_n = (n + 1) // 2
+                right_n = n - left_n
+                return left_n, right_n
+            i = max(1, int(io.get("inputs", 2)))
+            o = max(1, int(io.get("outputs", 2)))
+            return i, o
+        except Exception:
+            return 2, 2
+
+    def chip_pin_count(self) -> int:
+        io = (self._chip_data or {}).get("io", {})
+        try:
+            if "pins" in io:
+                return max(2, int(io.get("pins", 2)))
+        except Exception:
+            pass
+        # Fallback: trust current boundary port count.
+        try:
+            n_ports = len([p for p in getattr(self, "ports", []) if p is not None])
+            if n_ports >= 2:
+                return n_ports
+        except Exception:
+            pass
+        i, o = self.chip_io_counts()
+        return max(2, i + o)
 
     def labels_state(self) -> dict:
         return {
@@ -593,6 +757,10 @@ class ComponentItem(QGraphicsRectItem):
 
     def mouseDoubleClickEvent(self, e):  # open Properties on double-click
         sc = self.scene()
+        if self.is_chip() and sc and getattr(sc, "request_open_chip", None):
+            sc.request_open_chip(self)
+            e.accept()
+            return
         if sc and getattr(sc, "request_properties", None):
             sc.request_properties(self)  # MainWindow._show_properties_for
             e.accept()

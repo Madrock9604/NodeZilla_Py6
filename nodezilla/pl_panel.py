@@ -254,6 +254,17 @@ class PlPanel(QWidget):
         return cls._canonical_type_name(kind or display)
 
     @classmethod
+    def signature_from_kind_value(cls, kind: str, value: str):
+        lib = load_component_library()
+        cdef = lib.get(str(kind or "").strip())
+        class _Tmp:
+            pass
+        tmp = _Tmp()
+        tmp.kind = str(kind or "")
+        tmp.value = str(value or "")
+        return cls._component_signature(tmp, cdef)
+
+    @classmethod
     def _row_signature(cls, row_payload: dict):
         return (
             cls._canonical_type_name(str(row_payload.get("type", ""))),
@@ -288,6 +299,8 @@ class PlPanel(QWidget):
         cdef = lib.get(str(getattr(comp, "kind", "")).strip())
         if cdef is None:
             return True
+        if bool(getattr(cdef, "is_chip", False)):
+            return False
         return str(getattr(cdef, "comp_type", "component")).lower() != "net"
 
     def sync_used_from_components(self, components: list):
@@ -300,7 +313,10 @@ class PlPanel(QWidget):
         placed_counts = {}
         for comp in components:
             cdef = lib.get(str(getattr(comp, "kind", "")).strip())
-            if cdef is not None and str(getattr(cdef, "comp_type", "component")).lower() == "net":
+            if cdef is not None and (
+                str(getattr(cdef, "comp_type", "component")).lower() == "net"
+                or bool(getattr(cdef, "is_chip", False))
+            ):
                 continue
             sig = self._component_signature(comp, cdef)
             placed_counts[sig] = int(placed_counts.get(sig, 0)) + 1

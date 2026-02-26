@@ -34,6 +34,12 @@ class ComponentDef:
     spice_type: str = ""
     # Default value/part number assigned when placing a new component.
     default_value: str = ""
+    # Hierarchical "black-box" component that owns an internal schematic.
+    is_chip: bool = False
+    # Optional chip template path under assets/chips (e.g., "library/my_chip.json").
+    chip_template: str = ""
+    # Visibility in component library panel.
+    visible: bool = True
 
 
 class ComponentLibrary:
@@ -102,6 +108,9 @@ def _parse_component(
         value_label=value_label,
         spice_type=spice_type,
         default_value=default_value,
+        is_chip=bool(entry.get("is_chip", False)),
+        chip_template=str(entry.get("chip_template", "")).strip(),
+        visible=bool(entry.get("visible", True)),
     )
 
 

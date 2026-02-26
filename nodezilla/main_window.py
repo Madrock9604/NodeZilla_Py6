@@ -21,6 +21,7 @@ from .properties_panel import PropertiesPanel
 from .net_panel import NetPanel
 from .graphics_items import ComponentItem, WireItem, CommentTextItem
 from .commands import DeleteItemsCommand, RotateComponentCommand
+from .commands import MirrorComponentCommand
 from .theme import ThemeWatcher
 from .component_library import load_component_library
 from .component_panel import ComponentPanel
@@ -29,6 +30,7 @@ from .instruments_tab import InstrumentTool, ScopePanel, SuppliesPanel, WavegenP
 from .discovery_backend import make_backend
 from .pl_panel import PlPanel
 from .project_explorer_panel import ProjectExplorerPanel
+from .chip_editor_dialog import ChipEditorDialog
 from nodezilla import Program as P
 
 
@@ -88,14 +90,47 @@ class FloatingToolIsland(QWidget):
                 self._layout.addWidget(w, row, 0)
                 w.show()
         else:
-            for i, w in enumerate(self._widgets):
-                self._layout.addWidget(w, 0, i)
-                w.show()
+            self._layout_horizontal_wrapped()
         self._layout_orientation = orientation
         self.setMinimumSize(0, 0)
         self.resize(self.sizeHint())
         self.adjustSize()
         self._clamp_to_parent()
+
+    def _layout_horizontal_wrapped(self):
+        """Place controls in 1..N rows based on available parent width."""
+        p = self.parentWidget()
+        available = max(320, (p.width() - 12) if p is not None else 1200)
+        hspace = int(self._layout.horizontalSpacing() if self._layout.horizontalSpacing() >= 0 else 6)
+
+        def place_for_budget(budget: int):
+            while self._layout.count():
+                item = self._layout.takeAt(0)
+                w = item.widget()
+                if w is not None:
+                    self._layout.removeWidget(w)
+            row = 0
+            col = 0
+            used = 0
+            for w in self._widgets:
+                hint_w = max(24, int(w.minimumSizeHint().width()))
+                if col > 0 and (used + hspace + hint_w) > budget:
+                    row += 1
+                    col = 0
+                    used = 0
+                self._layout.addWidget(w, row, col)
+                w.show()
+                used += (hspace if col > 0 else 0) + hint_w
+                col += 1
+
+        # Retry with tighter budgets until full island width fits viewport.
+        budget = max(220, available - 20)
+        for _ in range(5):
+            place_for_budget(budget)
+            self.adjustSize()
+            if self.sizeHint().width() <= available:
+                break
+            budget = max(180, budget - 40)
 
     def reset_default_geometry(self):
         """Place island to a sane readable default after viewport is ready."""
@@ -143,6 +178,8 @@ class FloatingToolIsland(QWidget):
     def eventFilter(self, obj, event):
         if obj is self.parent():
             if event.type() in (QEvent.Resize, QEvent.Show):
+                if self._layout_orientation == "h":
+                    self._rebuild_layout("h")
                 if not self._initialized:
                     # Defer until viewport has a stable size.
                     QTimer.singleShot(0, self.reset_default_geometry)
@@ -181,6 +218,9 @@ class MainWindow(QMainWindow):
         self.backend = make_backend()
 
         self.schematic_tab = SchematicTab(self.status_label, self.undo_stack)
+        self._active_scene = self.schematic_tab.scene
+        self._active_view = self.schematic_tab.view
+        self._chip_editors: list[ChipEditorDialog] = []
         self.component_library = load_component_library()
         theme = self._watcher.current_theme()
         self._apply_theme(theme)
@@ -241,7 +281,7 @@ class MainWindow(QMainWindow):
         self.pl_dock = pl_dock
 
         self.component_panel = ComponentPanel(self.component_library)
-        self.component_panel.place_requested.connect(self.schematic_tab.scene.set_mode_place)
+        self.component_panel.place_requested.connect(self._set_mode_place_active)
         component_dock = QDockWidget("Components", self)
         component_dock.setWidget(self.component_panel)
         component_dock.setObjectName("ComponentsDock")
@@ -261,8 +301,10 @@ class MainWindow(QMainWindow):
         self.component_dock.raise_()
 
         self.schematic_tab.scene.request_properties = self._show_properties_for
+        self.schematic_tab.scene.request_open_chip = self._open_chip_editor_for_component
         self.schematic_tab.scene.selectionChanged.connect(self._on_selection_changed)
         self.schematic_tab.scene.component_placed.connect(self._on_component_placed)
+        self.schematic_tab.view.viewport().installEventFilter(self)
 
         self._build_toolbar()
         self._build_schematic_island()
@@ -322,6 +364,39 @@ class MainWindow(QMainWindow):
             return
         self.schematic_tab.scene.apply_theme(theme)
 
+    def eventFilter(self, obj, event):
+        if obj is self.schematic_tab.view.viewport():
+            if event.type() in (QEvent.MouseButtonPress, QEvent.FocusIn):
+                self._set_active_schematic_context(self.schematic_tab.scene, self.schematic_tab.view)
+        return super().eventFilter(obj, event)
+
+    def _set_active_schematic_context(self, scene, view):
+        self._active_scene = scene
+        self._active_view = view
+        try:
+            self._sync_grid_controls_from_scene(scene)
+        except Exception:
+            pass
+
+    def _scene_for_controls(self):
+        return self._active_scene if self._is_schematic_active() else self.schematic_tab.scene
+
+    def _view_for_controls(self):
+        return self._active_view if self._is_schematic_active() else self.schematic_tab.view
+
+    def _sync_grid_controls_from_scene(self, sc):
+        if sc is None:
+            return
+        gv = int(getattr(sc, "grid_size", 20) or 20)
+        if hasattr(self, "_grid_spin") and self._grid_spin.value() != gv:
+            self._grid_spin.blockSignals(True)
+            self._grid_spin.setValue(gv)
+            self._grid_spin.blockSignals(False)
+        if hasattr(self, "_island_grid_spin") and self._island_grid_spin.value() != gv:
+            self._island_grid_spin.blockSignals(True)
+            self._island_grid_spin.setValue(gv)
+            self._island_grid_spin.blockSignals(False)
+
     def _on_tab_changed(self, index: int):
         """Show schematic docks only on the Schematic tab.
 
@@ -333,6 +408,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_schematic_island") and self._schematic_island is not None:
             self._schematic_island.setVisible(on_schematic)
         if on_schematic:
+            self._sync_grid_controls_from_scene(self._scene_for_controls())
             if self._schematic_dock_visibility.get("props", True):
                 self.props_dock.show()
             else:
@@ -380,7 +456,7 @@ class MainWindow(QMainWindow):
     # selection → props
     def _on_selection_changed(self):
         """Push active selection into the properties panel."""
-        selected = self.schematic_tab.scene.selectedItems()
+        selected = self._scene_for_controls().selectedItems()
         texts = [it for it in selected if isinstance(it, CommentTextItem)]
         if texts:
             self.props_panel.show_text(texts[0])
@@ -389,7 +465,7 @@ class MainWindow(QMainWindow):
         if wires:
             self.props_panel.show_wire(wires[0])
             return
-        comps = [it for it in self.schematic_tab.scene.selectedItems() if isinstance(it, ComponentItem)]
+        comps = [it for it in selected if isinstance(it, ComponentItem)]
         self.props_panel.show_component(comps[0] if comps else None)
 
     def _resolve_library_kind_for_pl(self, pl_type: str, pl_name: str, value_or_part: str) -> str | None:
@@ -454,21 +530,173 @@ class MainWindow(QMainWindow):
         self._refresh_pl_used_flags()
         self._pending_pl_component_id = None
 
+    def _open_chip_editor_for_component(self, comp: ComponentItem):
+        dlg = ChipEditorDialog(comp, self)
+        dlg.scene.request_properties = self._show_properties_for
+        dlg.scene.request_open_chip = self._open_chip_editor_for_component
+        dlg.scene.selectionChanged.connect(self._on_selection_changed)
+        dlg.activated.connect(self._set_active_schematic_context)
+        dlg.closed.connect(self._on_chip_editor_closed)
+        self._chip_editors.append(dlg)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def _on_chip_editor_closed(self, dlg):
+        self._chip_editors = [d for d in self._chip_editors if d is not dlg]
+        if self._active_scene is getattr(dlg, "scene", None):
+            self._set_active_schematic_context(self.schematic_tab.scene, self.schematic_tab.view)
+            self._on_selection_changed()
+        # Chip internals are saved on close; refresh panels that depend on netlist.
+        self._refresh_live_spice_panel()
+        self._refresh_pl_used_flags()
+
+    def _set_mode_place_active(self, kind: str):
+        sc = self._scene_for_controls()
+        if sc is not None:
+            sc.set_mode_place(kind)
+
+    def _start_place_chip(self):
+        sc = self._scene_for_controls()
+        if sc is None:
+            return
+        pin_count, ok = QInputDialog.getInt(
+            self,
+            "Create Chip",
+            "Number of pins:",
+            4,
+            2,
+            128,
+            1,
+        )
+        if not ok:
+            return
+        sc.set_mode_place_chip(pin_count)
+
+    @staticmethod
+    def _chip_port_defs(pin_count: int):
+        n = max(2, int(pin_count))
+        left_n = (n + 1) // 2
+        right_n = n - left_n
+        span_left = max(40.0, (left_n - 1) * 16.0) if left_n > 1 else 0.0
+        span_right = max(40.0, (right_n - 1) * 16.0) if right_n > 1 else 0.0
+        left_top = -span_left / 2.0
+        right_top = -span_right / 2.0
+        left_step = (span_left / float(left_n - 1)) if left_n > 1 else 0.0
+        right_step = (span_right / float(right_n - 1)) if right_n > 1 else 0.0
+        ports = []
+        idx = 1
+        for i in range(left_n):
+            ports.append({"name": str(idx), "x": -50.0, "y": float(left_top + i * left_step)})
+            idx += 1
+        for i in range(right_n):
+            ports.append({"name": str(idx), "x": 50.0, "y": float(right_top + i * right_step)})
+            idx += 1
+        return ports
+
+    def _save_selected_chip_as_reusable(self):
+        sc = self._scene_for_controls()
+        if sc is None:
+            return
+        chips = [
+            it for it in sc.selectedItems()
+            if isinstance(it, ComponentItem) and hasattr(it, "is_chip") and it.is_chip()
+        ]
+        if not chips:
+            QMessageBox.information(self, "Save Chip", "Select one chip to save as reusable component.")
+            return
+        chip = chips[0]
+        default_name = (chip.value or chip.refdes or "MyChip").strip()
+        display_name, ok = QInputDialog.getText(
+            self,
+            "Save Chip as Reusable",
+            "Display name:",
+            text=default_name,
+        )
+        if not ok:
+            return
+        display_name = display_name.strip()
+        if not display_name:
+            QMessageBox.warning(self, "Save Chip", "Display name cannot be empty.")
+            return
+
+        slug = "".join(ch.lower() if ch.isalnum() else "_" for ch in display_name).strip("_")
+        if not slug:
+            slug = "chip"
+        kind = f"Chip_{slug}"
+
+        root = Path(__file__).resolve().parent.parent
+        chips_root = root / "assets" / "chips" / "library"
+        comps_root = root / "assets" / "components" / "library" / "Hierarchy" / "Chips"
+        chips_root.mkdir(parents=True, exist_ok=True)
+        comps_root.mkdir(parents=True, exist_ok=True)
+
+        template_rel = f"library/{slug}.json"
+        template_path = chips_root / f"{slug}.json"
+        comp_path = comps_root / f"{slug}.json"
+
+        chip_internal = chip.chip_data() if hasattr(chip, "chip_data") else {}
+        if not isinstance(chip_internal, dict):
+            chip_internal = {}
+        if "components" not in chip_internal:
+            chip_internal = sc.serialize()
+
+        pin_count = chip.chip_pin_count() if hasattr(chip, "chip_pin_count") else max(2, len(getattr(chip, "ports", [])))
+        if isinstance(chip_internal, dict):
+            chip_internal = dict(chip_internal)
+            chip_internal["io"] = {"pins": int(pin_count)}
+
+        component_def = {
+            "kind": kind,
+            "display_name": display_name,
+            "category": "Hierarchy / Chips",
+            "prefix": "U",
+            "spice_type": "X",
+            "value_label": "Part Number",
+            "show_value": True,
+            "default_value": display_name,
+            "type": "component",
+            "is_chip": True,
+            "chip_template": template_rel,
+            "visible": True,
+            "symbol": "defaults/chip.json",
+            "auto_align_terminals": False,
+            "auto_scale_symbol": False,
+            "ports": self._chip_port_defs(int(pin_count)),
+        }
+
+        try:
+            template_path.write_text(json.dumps(chip_internal, indent=2))
+            comp_path.write_text(json.dumps(component_def, indent=2))
+        except Exception as e:
+            QMessageBox.critical(self, "Save Chip", f"Failed to save reusable chip: {e}")
+            return
+
+        self.component_library = load_component_library(force_reload=True)
+        self.component_panel.reload_library()
+        self._install_component_shortcuts()
+        self.statusBar().showMessage(f"Reusable chip saved: {display_name}", 4000)
+
     def _refresh_pl_used_flags(self):
-        comps = [it for it in self.schematic_tab.scene.items() if isinstance(it, ComponentItem)]
+        # Use flattened netlist components so chip internals count as used parts.
+        from .netlist_exporter import NetlistBuilder
+        try:
+            comps = NetlistBuilder().build(self.schematic_tab.scene).components
+        except Exception:
+            comps = [it for it in self.schematic_tab.scene.items() if isinstance(it, ComponentItem)]
         if hasattr(self, "pl_panel") and self.pl_panel is not None:
             self.pl_panel.sync_used_from_components(comps)
 
     def _verify_pl_availability(self):
         if not hasattr(self, "pl_panel") or self.pl_panel is None:
             return
-        comps = [it for it in self.schematic_tab.scene.items() if isinstance(it, ComponentItem)]
+        # Verify from generated netlist (flattened), not from raw scene items.
+        from .netlist_exporter import NetlistBuilder
+        netlist = NetlistBuilder().build(self.schematic_tab.scene)
         placed_counts = {}
         placed_refs = {}
-        for c in comps:
-            if not self.pl_panel.is_physical_component(c):
-                continue
-            sig = self.pl_panel.component_signature(c)
+        for c in netlist.components:
+            sig = self.pl_panel.signature_from_kind_value(getattr(c, "kind", ""), getattr(c, "value", ""))
             placed_counts[sig] = int(placed_counts.get(sig, 0)) + 1
             placed_refs.setdefault(sig, []).append(str(getattr(c, "refdes", "")).strip() or "?")
 
@@ -514,8 +742,9 @@ class MainWindow(QMainWindow):
         text_family: str = "",
     ):
         """Apply edits from PropertiesPanel back to selected scene items."""
+        sc = self._scene_for_controls()
         if kind == "text":
-            texts = [it for it in self.schematic_tab.scene.selectedItems() if isinstance(it, CommentTextItem)]
+            texts = [it for it in sc.selectedItems() if isinstance(it, CommentTextItem)]
             for t in texts:
                 if text_value is not None:
                     t.setPlainText(text_value)
@@ -530,12 +759,12 @@ class MainWindow(QMainWindow):
                     t.set_text_color(QColor(text_color) if text_color else None)
             return
         if kind == "wire":
-            wires = [it for it in self.schematic_tab.scene.selectedItems() if isinstance(it, WireItem)]
+            wires = [it for it in sc.selectedItems() if isinstance(it, WireItem)]
             for w in wires:
                 if hasattr(w, "set_wire_color"):
                     w.set_wire_color(wire_color or None)
             return
-        comps = [it for it in self.schematic_tab.scene.selectedItems() if isinstance(it, ComponentItem)]
+        comps = [it for it in sc.selectedItems() if isinstance(it, ComponentItem)]
         if not comps:
             return
         for c in comps:
@@ -783,7 +1012,7 @@ class MainWindow(QMainWindow):
 
     def _handle_component_shortcut(self, kind: str, shortcut: str):
         """Resolve conflicts between placement hotkeys and component shortcuts."""
-        sc = self.schematic_tab.scene
+        sc = self._scene_for_controls()
         key = shortcut.strip().upper()
         if self._is_schematic_active() and key == "T":
             sc.set_mode_text()
@@ -810,7 +1039,7 @@ class MainWindow(QMainWindow):
 
         act_select = QAction("Select", self)
         act_select.setShortcut("V")
-        act_select.triggered.connect(self.schematic_tab.scene.set_mode_select)
+        act_select.triggered.connect(lambda: self._scene_for_controls().set_mode_select())
         tb.addAction(act_select)
 
         act_components = QAction("Components", self)
@@ -823,17 +1052,22 @@ class MainWindow(QMainWindow):
         act_components.triggered.connect(_open_components)
         tb.addAction(act_components)
 
+        act_chip = QAction("Chip", self)
+        act_chip.setShortcut("H")
+        act_chip.triggered.connect(self._start_place_chip)
+        tb.addAction(act_chip)
+
         tb.addSeparator()
         act_wire = QAction("Wire", self)
         act_wire.setShortcut("W")
-        act_wire.triggered.connect(self.schematic_tab.scene.set_mode_wire)
+        act_wire.triggered.connect(lambda: self._scene_for_controls().set_mode_wire())
         tb.addAction(act_wire)
         act_text = QAction("Text", self)
         act_text.setShortcut("T")
-        act_text.triggered.connect(self.schematic_tab.scene.set_mode_text)
+        act_text.triggered.connect(lambda: self._scene_for_controls().set_mode_text())
         tb.addAction(act_text)
         act_net_label = QAction("Net Label", self)
-        act_net_label.triggered.connect(lambda: self.schematic_tab.scene.set_mode_place("NetLabel"))
+        act_net_label.triggered.connect(lambda: self._scene_for_controls().set_mode_place("NetLabel"))
         tb.addAction(act_net_label)
 
         act_delete = QAction("Delete", self)
@@ -886,17 +1120,17 @@ class MainWindow(QMainWindow):
         tb.addSeparator()
         act_fit = QAction("Fit", self)
         act_fit.setShortcut("F")
-        act_fit.triggered.connect(self.schematic_tab.view.fit_all)
+        act_fit.triggered.connect(lambda: self._view_for_controls().fit_all())
         tb.addAction(act_fit)
 
         act_zoom_in = QAction("Zoom +", self)
         act_zoom_in.setShortcut("+")
-        act_zoom_in.triggered.connect(lambda: self.schematic_tab.view.scale(1.15, 1.15))
+        act_zoom_in.triggered.connect(lambda: self._view_for_controls().scale(1.15, 1.15))
         tb.addAction(act_zoom_in)
 
         act_zoom_out = QAction("Zoom -", self)
         act_zoom_out.setShortcut("-")
-        act_zoom_out.triggered.connect(lambda: self.schematic_tab.view.scale(1/1.15, 1/1.15))
+        act_zoom_out.triggered.connect(lambda: self._view_for_controls().scale(1/1.15, 1/1.15))
         tb.addAction(act_zoom_out)
 
         tb.addSeparator()
@@ -931,11 +1165,12 @@ class MainWindow(QMainWindow):
             b.clicked.connect(cb)
             return b
 
-        select_btn = btn("Select", self.schematic_tab.scene.set_mode_select, icon_name="cursor-arrow")
+        select_btn = btn("Select", lambda: self._scene_for_controls().set_mode_select(), icon_name="cursor-arrow")
         components_btn = btn("Components", lambda: (self.component_dock.show(), self.component_dock.raise_()), icon_name="folder")
-        wire_btn = btn("Wire", self.schematic_tab.scene.set_mode_wire, icon_name="draw-line")
-        text_btn = btn("Text", self.schematic_tab.scene.set_mode_text, icon_name="insert-text")
-        net_label_btn = btn("Net Label", lambda: self.schematic_tab.scene.set_mode_place("NetLabel"), icon_name="tag")
+        chip_btn = btn("Chip", self._start_place_chip, icon_name="applications-engineering")
+        wire_btn = btn("Wire", lambda: self._scene_for_controls().set_mode_wire(), icon_name="draw-line")
+        text_btn = btn("Text", lambda: self._scene_for_controls().set_mode_text(), icon_name="insert-text")
+        net_label_btn = btn("Net Label", lambda: self._scene_for_controls().set_mode_place("NetLabel"), icon_name="tag")
         delete_btn = btn("Delete", self._delete_selected, icon_name="edit-delete")
         rot_cw_btn = btn("Rotate CW", lambda: self._rotate_selected(90), icon_name="object-rotate-right")
         rot_ccw_btn = btn("Rotate CCW", lambda: self._rotate_selected(-90), icon_name="object-rotate-left")
@@ -943,9 +1178,9 @@ class MainWindow(QMainWindow):
         mirror_y_btn = btn("Mirror Y", self._on_shortcut_place_mirror_y, icon_name="object-flip-vertical")
         grid_btn = btn("Grid", self._toggle_grid, icon_name="view-grid")
         snap_btn = btn("Snap", self._toggle_snap, icon_name="snap-to-grid")
-        fit_btn = btn("Fit", self.schematic_tab.view.fit_all, icon_name="zoom-fit-best")
-        zoom_in_btn = btn("Zoom In", lambda: self.schematic_tab.view.scale(1.15, 1.15), icon_name="zoom-in")
-        zoom_out_btn = btn("Zoom Out", lambda: self.schematic_tab.view.scale(1 / 1.15, 1 / 1.15), icon_name="zoom-out")
+        fit_btn = btn("Fit", lambda: self._view_for_controls().fit_all(), icon_name="zoom-fit-best")
+        zoom_in_btn = btn("Zoom In", lambda: self._view_for_controls().scale(1.15, 1.15), icon_name="zoom-in")
+        zoom_out_btn = btn("Zoom Out", lambda: self._view_for_controls().scale(1 / 1.15, 1 / 1.15), icon_name="zoom-out")
         export_btn = btn("Export Netlist", self._export_netlist, icon_name="document-save")
         runtime_btn = btn("Build Runtime Netlist", self._build_runtime_netlist, icon_name="media-playback-start")
 
@@ -960,7 +1195,7 @@ class MainWindow(QMainWindow):
         grid_plus_btn = btn("Grid +", lambda: self._nudge_grid(5))
 
         island.add_controls([
-            select_btn, components_btn, wire_btn, text_btn, net_label_btn, delete_btn,
+            select_btn, components_btn, chip_btn, wire_btn, text_btn, net_label_btn, delete_btn,
             rot_cw_btn, rot_ccw_btn, mirror_x_btn, mirror_y_btn, grid_btn, snap_btn,
             grid_label, self._island_grid_spin, grid_minus_btn, grid_plus_btn,
             fit_btn, zoom_in_btn, zoom_out_btn, export_btn, runtime_btn,
@@ -1013,6 +1248,10 @@ class MainWindow(QMainWindow):
         act_edit_custom.triggered.connect(self._edit_custom_component)
         fm.addAction(act_edit_custom)
 
+        act_save_chip = QAction("Save Selected Chip as Reusable…", self)
+        act_save_chip.triggered.connect(self._save_selected_chip_as_reusable)
+        fm.addAction(act_save_chip)
+
         fm.addSeparator()
         act_quit = QAction("Quit", self)
         act_quit.setShortcut(QKeySequence.Quit)
@@ -1032,6 +1271,7 @@ class MainWindow(QMainWindow):
         self._act_toggle_snap = add_shortcut(QKeySequence("Ctrl+Shift+S"), self._on_shortcut_toggle_snap)
         self._act_wire = add_shortcut(QKeySequence("W"), self._on_shortcut_set_wire)
         self._act_text = add_shortcut(QKeySequence("T"), self._on_shortcut_set_text)
+        self._act_chip = add_shortcut(QKeySequence("H"), self._on_shortcut_set_chip)
         self._act_fit = add_shortcut(QKeySequence("F"), self._on_shortcut_fit)
         self._act_components = add_shortcut(QKeySequence("A"), self._on_shortcut_open_components)
         self._act_escape = add_shortcut(QKeySequence(Qt.Key_Escape), self._on_shortcut_escape_to_select)
@@ -1044,33 +1284,26 @@ class MainWindow(QMainWindow):
 
     # grid/snap helpers
     def _toggle_grid(self):
-        sc = self.schematic_tab.scene
+        sc = self._scene_for_controls()
         sc.grid_on = not sc.grid_on
         sc.update()
 
     def _toggle_snap(self):
-        sc = self.schematic_tab.scene
+        sc = self._scene_for_controls()
         sc.snap_on = not sc.snap_on
         self.statusBar().showMessage(f"Snap: {'ON' if sc.snap_on else 'OFF'}", 3000)
 
     def _toggle_grid_style(self):
-        sc = self.schematic_tab.scene
+        sc = self._scene_for_controls()
         sc.grid_style = 'dots' if sc.grid_style == 'lines' else 'lines'
         self.statusBar().showMessage(f"Grid style: {sc.grid_style}", 2000)
         sc.update()
 
     def _change_grid_size(self, v: int):
-        sc = self.schematic_tab.scene
+        sc = self._scene_for_controls()
         sc.grid_size = max(1, int(v))
         sc.update()
-        if hasattr(self, "_grid_spin") and self._grid_spin.value() != sc.grid_size:
-            self._grid_spin.blockSignals(True)
-            self._grid_spin.setValue(sc.grid_size)
-            self._grid_spin.blockSignals(False)
-        if hasattr(self, "_island_grid_spin") and self._island_grid_spin.value() != sc.grid_size:
-            self._island_grid_spin.blockSignals(True)
-            self._island_grid_spin.setValue(sc.grid_size)
-            self._island_grid_spin.blockSignals(False)
+        self._sync_grid_controls_from_scene(sc)
         self.statusBar().showMessage(f"Grid size: {sc.grid_size}px", 1500)
 
     def _nudge_grid(self, d: int):
@@ -1081,14 +1314,16 @@ class MainWindow(QMainWindow):
         if self.props_dock.isHidden():
             self.props_dock.show()
         self.props_dock.raise_()
-        self.schematic_tab.scene.clearSelection()
+        sc = comp.scene()
+        if sc is not None:
+            sc.clearSelection()
         comp.setSelected(True)
         self.props_panel.show_component(comp)
         self.props_panel.refdes_edit.setFocus()
 
     def _delete_selected(self):
         """Delete selected scene items using undo stack command."""
-        sc = self.schematic_tab.scene
+        sc = self._scene_for_controls()
         sel = list(sc.selectedItems())
         if sel:
             sc.undo_stack.push(DeleteItemsCommand(sc, sel))
@@ -1106,15 +1341,19 @@ class MainWindow(QMainWindow):
 
     def _on_shortcut_set_wire(self):
         if self._is_schematic_active():
-            self.schematic_tab.scene.set_mode_wire()
+            self._scene_for_controls().set_mode_wire()
 
     def _on_shortcut_set_text(self):
         if self._is_schematic_active():
-            self.schematic_tab.scene.set_mode_text()
+            self._scene_for_controls().set_mode_text()
+
+    def _on_shortcut_set_chip(self):
+        if self._is_schematic_active():
+            self._start_place_chip()
 
     def _on_shortcut_fit(self):
         if self._is_schematic_active():
-            self.schematic_tab.view.fit_all()
+            self._view_for_controls().fit_all()
 
     def _on_shortcut_open_components(self):
         if not self._is_schematic_active():
@@ -1127,14 +1366,14 @@ class MainWindow(QMainWindow):
     def _on_shortcut_escape_to_select(self):
         if not self._is_schematic_active():
             return
-        sc = self.schematic_tab.scene
+        sc = self._scene_for_controls()
         sc.clearSelection()
         sc.set_mode_select()
 
     def _in_place_mode_with_ghost(self) -> bool:
         if not self._is_schematic_active():
             return False
-        sc = self.schematic_tab.scene
+        sc = self._scene_for_controls()
         return (
             getattr(sc, "mode", None) == getattr(sc, "Mode", object()).PLACE
             and getattr(sc, "_ghost_item", None) is not None
@@ -1143,33 +1382,50 @@ class MainWindow(QMainWindow):
     def _on_shortcut_place_rotate_cw(self):
         if not self._in_place_mode_with_ghost():
             return
-        g = self.schematic_tab.scene._ghost_item
+        g = self._scene_for_controls()._ghost_item
         g.setRotation((g.rotation() + 90) % 360)
 
     def _on_shortcut_place_rotate_ccw(self):
         if not self._in_place_mode_with_ghost():
             return
-        g = self.schematic_tab.scene._ghost_item
+        g = self._scene_for_controls()._ghost_item
         g.setRotation((g.rotation() - 90) % 360)
 
     def _on_shortcut_place_mirror_x(self):
-        if not self._in_place_mode_with_ghost():
+        if self._in_place_mode_with_ghost():
+            g = self._scene_for_controls()._ghost_item
+            if hasattr(g, "toggle_mirror_x"):
+                g.toggle_mirror_x()
             return
-        g = self.schematic_tab.scene._ghost_item
-        if hasattr(g, "toggle_mirror_x"):
-            g.toggle_mirror_x()
+        self._mirror_selected("x")
 
     def _on_shortcut_place_mirror_y(self):
-        if not self._in_place_mode_with_ghost():
+        if self._in_place_mode_with_ghost():
+            g = self._scene_for_controls()._ghost_item
+            if hasattr(g, "toggle_mirror_y"):
+                g.toggle_mirror_y()
             return
-        g = self.schematic_tab.scene._ghost_item
-        if hasattr(g, "toggle_mirror_y"):
-            g.toggle_mirror_y()
+        self._mirror_selected("y")
+
+    def _mirror_selected(self, axis: str):
+        sc = self._scene_for_controls()
+        comps = [it for it in sc.selectedItems() if isinstance(it, ComponentItem)]
+        if not comps:
+            self.statusBar().showMessage("Select a component to mirror", 2000)
+            return
+        for c in comps:
+            ms = c.mirror_state() if hasattr(c, "mirror_state") else {"mx": 1.0, "my": 1.0}
+            old = (float(ms.get("mx", 1.0)), float(ms.get("my", 1.0)))
+            if axis == "x":
+                new = (-old[0], old[1])
+            else:
+                new = (old[0], -old[1])
+            self.undo_stack.push(MirrorComponentCommand(c, old, new))
 
     def _on_shortcut_copy(self):
         if not self._is_schematic_active():
             return
-        sc = self.schematic_tab.scene
+        sc = self._scene_for_controls()
         selected = list(sc.selectedItems())
         comps = [it for it in selected if isinstance(it, ComponentItem)]
         wires_selected = [it for it in selected if isinstance(it, WireItem)]
@@ -1186,6 +1442,7 @@ class MainWindow(QMainWindow):
                 "mirror": c.mirror_state() if hasattr(c, "mirror_state") else {"mx": 1.0, "my": 1.0},
                 "value": c.value,
                 "labels": c.labels_state() if hasattr(c, "labels_state") else {},
+                "chip": c.chip_data() if hasattr(c, "chip_data") else {},
             })
 
         all_wires = [it for it in sc.items() if isinstance(it, WireItem)]
@@ -1238,7 +1495,7 @@ class MainWindow(QMainWindow):
         wires_data = payload.get("wires", [])
         if not comps_data and not wires_data:
             return
-        sc = self.schematic_tab.scene
+        sc = self._scene_for_controls()
         self._paste_serial += 1
         d = float(getattr(sc, "grid_size", 20) * self._paste_serial)
         delta = QPointF(d, d)
@@ -1255,6 +1512,8 @@ class MainWindow(QMainWindow):
             c.set_refdes(sc._next_refdes(kind))
             sc._bump_refseq(kind)
             c.set_value(str(cdata.get("value", "")))
+            if hasattr(c, "set_chip_data"):
+                c.set_chip_data(cdata.get("chip", {}))
             if hasattr(c, "apply_labels_state"):
                 c.apply_labels_state(cdata.get("labels", {}))
             sc.addItem(c)
@@ -1329,7 +1588,7 @@ class MainWindow(QMainWindow):
 
     def _rotate_selected(self, angle: int):
         """Rotate selected components and record undo command."""
-        sc = self.schematic_tab.scene
+        sc = self._scene_for_controls()
         comps = [it for it in sc.selectedItems() if isinstance(it, ComponentItem)]
         if not comps:
             self.statusBar().showMessage("Select a component to rotate", 2000)

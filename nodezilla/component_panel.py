@@ -38,6 +38,8 @@ class ComponentPanel(QWidget):
         self.tree.clear()
         categories: dict[tuple[str, ...], QTreeWidgetItem] = {}
         for comp in self._all:
+            if not getattr(comp, "visible", True):
+                continue
             hay = f"{comp.display_name} {comp.kind} {comp.category}".lower()
             if needle and needle not in hay:
                 continue

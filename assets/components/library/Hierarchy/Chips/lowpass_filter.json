@@ -1,0 +1,29 @@
+{
+  "kind": "Chip_lowpass_filter",
+  "display_name": "LowPass Filter",
+  "category": "Hierarchy / Chips",
+  "prefix": "U",
+  "spice_type": "X",
+  "value_label": "Part Number",
+  "show_value": true,
+  "default_value": "LowPass Filter",
+  "type": "component",
+  "is_chip": true,
+  "chip_template": "library/lowpass_filter.json",
+  "visible": true,
+  "symbol": "defaults/chip.json",
+  "auto_align_terminals": false,
+  "auto_scale_symbol": false,
+  "ports": [
+    {
+      "name": "1",
+      "x": -50.0,
+      "y": 0.0
+    },
+    {
+      "name": "2",
+      "x": 50.0,
+      "y": 0.0
+    }
+  ]
+}

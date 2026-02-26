@@ -334,6 +334,9 @@ class NetlistBuilder:
         def _is_net_component(kind: str) -> bool:
             cdef = comp_defs.get(kind)
             return bool(cdef and getattr(cdef, "comp_type", "component") == "net")
+        def _is_chip_component(kind: str) -> bool:
+            cdef = comp_defs.get(kind)
+            return bool(cdef and getattr(cdef, "is_chip", False))
         if hasattr(scene, "net_data"):
             # Preferred path: use scene.net_data() for robust wiring/junction logic.
             nets_meta = scene.net_data()
@@ -353,7 +356,7 @@ class NetlistBuilder:
 
             component_models: List[Component] = []
             for c in components:
-                if _is_net_component(c.kind):
+                if _is_net_component(c.kind) or _is_chip_component(c.kind):
                     continue
                 refdes = c.refdes or c.kind
                 pins: List[ComponentPin] = []
@@ -366,6 +369,16 @@ class NetlistBuilder:
                 cdef = comp_defs.get(c.kind)
                 spice_type = cdef.spice_type if cdef else ""
                 component_models.append(Component(refdes=c.refdes, kind=c.kind, value=c.value, pins=pins, spice_type=spice_type))
+
+            used_by_prefix = self._collect_used_refdes_numbers(component_models, comp_defs)
+            # Flatten hierarchical chip instances: include their internal components
+            # mapped onto parent nets via matching port/net-label names.
+            for c in components:
+                if not _is_chip_component(c.kind):
+                    continue
+                component_models.extend(
+                    self._expand_chip_instance(c, comp_defs, port_to_node, used_by_prefix)
+                )
             return Netlist(components=component_models, nets=nets)
 
         wires: List[WireItem] = [it for it in scene.items() if isinstance(it, WireItem)]
@@ -430,6 +443,168 @@ class NetlistBuilder:
             component_models.append(Component(refdes=c.refdes, kind=c.kind, value=c.value, pins=pins, spice_type=spice_type))
 
         return Netlist(components=component_models, nets=nets)
+
+    def _expand_chip_instance(
+        self,
+        chip: ComponentItem,
+        comp_defs,
+        port_to_node: Dict[Tuple[str, str], str],
+        used_by_prefix: Dict[str, set[int]],
+    ) -> List[Component]:
+        """Flatten one chip instance into internal component models."""
+        chip_data = chip.chip_data() if hasattr(chip, "chip_data") else {}
+        if not isinstance(chip_data, dict) or not chip_data:
+            return []
+
+        try:
+            from PySide6.QtWidgets import QLabel
+            from PySide6.QtGui import QUndoStack
+            from .schematic_scene import SchematicScene
+        except Exception:
+            return []
+
+        try:
+            child_scene = SchematicScene(QLabel(""), QUndoStack())
+            child_scene.load(chip_data)
+        except Exception:
+            return []
+
+        chip_ref = chip.refdes or chip.kind
+        ports = [p for p in getattr(chip, "ports", []) if p is not None] or [
+            p for p in (getattr(chip, "port_left", None), getattr(chip, "port_right", None)) if p is not None
+        ]
+        port_map_cs = {}
+        for p in ports:
+            outer = port_to_node.get((chip_ref, p.name), "OPEN")
+            port_map_cs[str(p.name).strip().casefold()] = outer
+
+        # Build child net resolution from actual connectivity (not only net names):
+        # if a child net contains numbered NetLabel (1..N), treat it as the same net
+        # as the corresponding top-level chip pin.
+        child_components: List[ComponentItem] = [
+            it for it in child_scene.items() if isinstance(it, ComponentItem)
+        ]
+        child_by_key: Dict[Tuple[str, str], ComponentItem] = {}
+        for c in child_components:
+            ref = (c.refdes or "").strip()
+            if ref:
+                child_by_key[(ref, c.kind)] = c
+
+        child_port_to_net: Dict[Tuple[str, str], str] = {}
+        nets_meta = child_scene.net_data() if hasattr(child_scene, "net_data") else []
+        for n in nets_meta:
+            net_name = str(n.get("name", "")).strip() or "OPEN"
+            resolved_net = net_name
+            # Find any NetLabel on this net that maps to a chip boundary pin number.
+            for conn in n.get("connections", []):
+                cdef = comp_defs.get(conn.component_kind)
+                if not (cdef and getattr(cdef, "comp_type", "component") == "net"):
+                    continue
+                comp = child_by_key.get((conn.component_refdes, conn.component_kind))
+                label = (comp.value.strip() if comp is not None else "").casefold()
+                if label and label in port_map_cs:
+                    resolved_net = port_map_cs[label]
+                    break
+
+            for conn in n.get("connections", []):
+                cdef = comp_defs.get(conn.component_kind)
+                if cdef and getattr(cdef, "comp_type", "component") == "net":
+                    continue
+                key = (conn.component_refdes, conn.port_name)
+                child_port_to_net[key] = resolved_net
+
+        expanded: List[Component] = []
+        for comp in child_components:
+            cdef = comp_defs.get(comp.kind)
+            if cdef and (getattr(cdef, "comp_type", "component") == "net" or getattr(cdef, "is_chip", False)):
+                continue
+            prefix = self._prefix_for_kind(comp.kind, comp_defs)
+            merged_ref = self._next_refdes_for_prefix(prefix, used_by_prefix)
+            merged_pins: List[ComponentPin] = []
+            ports_local = [p for p in getattr(comp, "ports", []) if p is not None] or [
+                p for p in (getattr(comp, "port_left", None), getattr(comp, "port_right", None)) if p is not None
+            ]
+            for p in ports_local:
+                raw = child_port_to_net.get((comp.refdes, p.name), "OPEN")
+                mapped = self._qualify_child_net(chip_ref, raw)
+                merged_pins.append(ComponentPin(name=p.name, net=mapped))
+            expanded.append(
+                Component(
+                    refdes=merged_ref,
+                    kind=comp.kind,
+                    value=comp.value,
+                    pins=merged_pins,
+                    spice_type=(cdef.spice_type if cdef else ""),
+                )
+            )
+        return expanded
+
+    def _collect_used_refdes_numbers(self, components: List[Component], comp_defs) -> Dict[str, set[int]]:
+        used: Dict[str, set[int]] = {}
+        for comp in components:
+            prefix = self._prefix_for_kind(comp.kind, comp_defs)
+            num = self._parse_refdes_num(comp.refdes, prefix)
+            if num is not None:
+                used.setdefault(prefix, set()).add(num)
+        return used
+
+    @staticmethod
+    def _parse_refdes_num(refdes: str, prefix: str) -> int | None:
+        text = (refdes or "").strip()
+        if not text:
+            return None
+        if text.startswith(prefix):
+            tail = text[len(prefix):]
+            if tail.isdigit():
+                try:
+                    return int(tail)
+                except Exception:
+                    return None
+        m = re.search(r"(\d+)$", text)
+        if not m:
+            return None
+        try:
+            return int(m.group(1))
+        except Exception:
+            return None
+
+    @staticmethod
+    def _prefix_for_kind(kind: str, comp_defs) -> str:
+        cdef = comp_defs.get(kind) if comp_defs is not None else None
+        if cdef is not None and getattr(cdef, "prefix", ""):
+            return str(cdef.prefix)
+        k = (kind or "").lower()
+        if k.startswith("res"):
+            return "R"
+        if k.startswith("cap"):
+            return "C"
+        if k.startswith("ind"):
+            return "L"
+        if k.startswith("dio"):
+            return "D"
+        if k.startswith("ground") or k.startswith("gnd"):
+            return "GND"
+        return (kind[:1].upper() if kind else "X")
+
+    @staticmethod
+    def _next_refdes_for_prefix(prefix: str, used_by_prefix: Dict[str, set[int]]) -> str:
+        used = used_by_prefix.setdefault(prefix, set())
+        n = 1
+        while n in used:
+            n += 1
+        used.add(n)
+        return f"{prefix}{n}"
+
+    @staticmethod
+    def _qualify_child_net(chip_ref: str, net_name: str) -> str:
+        """Keep simple net names for internal chip nets."""
+        n = (net_name or "").strip()
+        if not n:
+            return "OPEN"
+        up = n.upper()
+        if up in {"0", "GND", "GROUND", "VDD", "VSS", "VEE", "OPEN", "NC"}:
+            return "0" if up in {"0", "GND", "GROUND"} else n
+        return n
 
     def format(self, netlist: Netlist) -> str:
         return self._formatter(netlist)
