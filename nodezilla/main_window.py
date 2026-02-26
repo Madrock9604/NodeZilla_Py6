@@ -31,6 +31,7 @@ from .discovery_backend import make_backend
 from .pl_panel import PlPanel
 from .project_explorer_panel import ProjectExplorerPanel
 from .chip_editor_dialog import ChipEditorDialog
+from .paths import user_examples_dir, user_projects_dir, user_assets_root
 from nodezilla import Program as P
 
 
@@ -289,7 +290,7 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.LeftDockWidgetArea, component_dock)
         self.component_dock = component_dock
 
-        self.project_explorer_panel = ProjectExplorerPanel(Path.cwd())
+        self.project_explorer_panel = ProjectExplorerPanel(user_projects_dir(), user_examples_dir())
         self.project_explorer_panel.open_requested.connect(self._open_schematic_path)
         project_dock = QDockWidget("Project Explorer", self)
         project_dock.setWidget(self.project_explorer_panel)
@@ -625,9 +626,9 @@ class MainWindow(QMainWindow):
             slug = "chip"
         kind = f"Chip_{slug}"
 
-        root = Path(__file__).resolve().parent.parent
-        chips_root = root / "assets" / "chips" / "library"
-        comps_root = root / "assets" / "components" / "library" / "Hierarchy" / "Chips"
+        assets_root = user_assets_root()
+        chips_root = assets_root / "chips" / "library"
+        comps_root = assets_root / "components" / "library" / "Hierarchy" / "Chips"
         chips_root.mkdir(parents=True, exist_ok=True)
         comps_root.mkdir(parents=True, exist_ok=True)
 
@@ -1661,6 +1662,16 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Device required", "Connect a device first.")
             return
 
+        # Preserve current supplies state so runtime build cannot silently
+        # change rails configuration (especially when master is OFF).
+        pre_supplies_ok = False
+        pre_supplies = {}
+        try:
+            pre_supplies_ok, _pre_msg, pre_supplies = backend.read_supplies_status()
+        except Exception:
+            pre_supplies_ok = False
+            pre_supplies = {}
+
         try:
             netlist_text = sc.export_netlist_text()
         except Exception as e:
@@ -1696,6 +1707,41 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Runtime script error", f"Failed while processing runtime script: {e}")
             return
+        finally:
+            # Always clear runtime-driven DIO states first.
+            try:
+                if hasattr(backend, "digitalio_write_mask"):
+                    backend.digitalio_write_mask(0)
+            except Exception:
+                pass
+
+            # Restore supplies to their prior state.
+            was_on = bool(pre_supplies.get("master_enabled", False)) if pre_supplies_ok else False
+            tracking = bool(pre_supplies.get("tracking", False))
+            power_limit_w = float(pre_supplies.get("power_limit_w", 2.5))
+            try:
+                if was_on:
+                    backend.configure_supplies(
+                        master_enabled=True,
+                        v_pos_v=float(pre_supplies.get("v_pos_v", 1.0)),
+                        v_neg_v=float(pre_supplies.get("v_neg_v", -1.0)),
+                        tracking=tracking,
+                        power_limit_w=power_limit_w,
+                    )
+                else:
+                    # Hard-off path: guarantees rails and DIO are forced low.
+                    ok_stop, _msg_stop = backend.stop_tool("supplies")
+                    if not ok_stop:
+                        backend.configure_supplies(
+                            master_enabled=False,
+                            v_pos_v=0.0,
+                            v_neg_v=0.0,
+                            tracking=tracking,
+                            power_limit_w=power_limit_w,
+                        )
+            except Exception:
+                pass
+            self._sync_supplies_docks()
         self.statusBar().showMessage(
             f"Runtime SPICE netlist ready: {self.runtime_spice_netlist_path}",
             5000,

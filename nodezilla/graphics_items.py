@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from .schematic_scene import SchematicScene
 from .theme import Theme
 from .component_library import load_component_library
+from .paths import user_assets_root
 
 PORT_RADIUS = 5.0
 COMP_WIDTH = 100.0
@@ -278,8 +279,7 @@ class ComponentItem(QGraphicsRectItem):
 
     def _load_chip_template(self, rel_path: str) -> dict:
         try:
-            root = Path(__file__).resolve().parent.parent
-            p = (root / "assets" / "chips" / str(rel_path).replace("\\", "/")).resolve()
+            p = (user_assets_root() / "chips" / str(rel_path).replace("\\", "/")).resolve()
             data = json.loads(p.read_text()) if p.exists() else {}
             return data if isinstance(data, dict) else {}
         except Exception:
@@ -582,10 +582,8 @@ class ComponentItem(QGraphicsRectItem):
     def _symbol_path_for_kind(self) -> Optional[Path]:
         comp_def = load_component_library().get(self.kind)
         if comp_def and comp_def.symbol:
-            root = Path(__file__).resolve().parent.parent
-            assets = root / "assets"
             symbol = str(comp_def.symbol).replace("\\", "/")
-            base_sym = assets / "symbols"
+            base_sym = user_assets_root() / "symbols"
             candidate = base_sym / symbol
             if candidate.exists():
                 return candidate

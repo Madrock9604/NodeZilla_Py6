@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Iterable
 import json
+from .paths import user_assets_root
 
 
 # Component library data model.
@@ -58,7 +59,7 @@ class ComponentLibrary:
 
 
 def _assets_root() -> Path:
-    return Path(__file__).resolve().parent.parent / "assets"
+    return user_assets_root()
 
 
 def _library_root() -> Path:

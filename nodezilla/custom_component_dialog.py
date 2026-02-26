@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from .component_library import load_component_library, find_component_file
 from .graphics_items import COMP_WIDTH, COMP_HEIGHT
+from .paths import user_assets_root
 
 
 # Custom symbol normalization target.
@@ -446,7 +447,7 @@ class CustomComponentDialog(QDialog):
         return QPointF(start.x() + (d if dx >= 0 else -d), start.y() + (d if dy >= 0 else -d))
 
     def _choose_category_folder(self):
-        root = Path(__file__).resolve().parent.parent / "assets" / "components" / "library"
+        root = user_assets_root() / "components" / "library"
         root.mkdir(parents=True, exist_ok=True)
         folder = QFileDialog.getExistingDirectory(self, "Choose Category Folder", str(root))
         if not folder:
@@ -460,7 +461,7 @@ class CustomComponentDialog(QDialog):
 
     def _refresh_category_folder(self):
         """Validate current category path still exists on disk."""
-        root = Path(__file__).resolve().parent.parent / "assets" / "components" / "library"
+        root = user_assets_root() / "components" / "library"
         root.mkdir(parents=True, exist_ok=True)
         current = self.category_edit.text().strip()
         if current:
@@ -796,7 +797,7 @@ class CustomComponentDialog(QDialog):
                 )
                 return
 
-        sym_dir = Path(__file__).resolve().parent.parent / "assets" / "symbols" / "custom"
+        sym_dir = user_assets_root() / "symbols" / "custom"
         sym_dir.mkdir(parents=True, exist_ok=True)
         safe_display = "".join(c for c in display if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_") or kind
         sym_path = sym_dir / f"{safe_display}.json"
@@ -808,7 +809,7 @@ class CustomComponentDialog(QDialog):
         def _norm_xy(x: float, y: float) -> tuple[float, float]:
             return (x * scale + tx, y * scale + ty)
 
-        root = Path(__file__).resolve().parent.parent / "assets" / "components" / "library"
+        root = user_assets_root() / "components" / "library"
         # Allow nested categories using "A/B" or "A / B"
         raw_parts = [p.strip() for p in category.replace(" / ", "/").split("/") if p.strip()]
         if not raw_parts:
@@ -877,7 +878,7 @@ class CustomComponentDialog(QDialog):
 
         symbol = entry.get("symbol", "")
         if symbol.endswith(".json"):
-            sym_path = Path(__file__).resolve().parent.parent / "assets" / "symbols" / symbol
+            sym_path = user_assets_root() / "symbols" / symbol
             if sym_path.exists():
                 try:
                     sym = json.loads(sym_path.read_text())

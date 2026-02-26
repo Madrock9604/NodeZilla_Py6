@@ -42,10 +42,10 @@ class ProjectExplorerPanel(QWidget):
         "Examples",
     }
 
-    def __init__(self, project_root: Path | None = None):
+    def __init__(self, project_root: Path | None = None, examples_root: Path | None = None):
         super().__init__()
         self._project_root = Path(project_root or Path.cwd()).resolve()
-        self._examples_root = (Path(__file__).resolve().parent.parent / "Examples").resolve()
+        self._examples_root = Path(examples_root or (Path(__file__).resolve().parent.parent / "Examples")).resolve()
 
         root = QVBoxLayout(self)
         top = QHBoxLayout()

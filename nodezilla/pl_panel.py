@@ -21,6 +21,7 @@ from PySide6.QtGui import QColor, QBrush
 
 from . import Program as P
 from .component_library import load_component_library
+from .paths import user_pl_path
 
 
 class PlPanel(QWidget):
@@ -75,6 +76,7 @@ class PlPanel(QWidget):
 
     def _fallback_pl_candidates(self) -> list[Path]:
         out: list[Path] = []
+        out.append(user_pl_path())
         env_path = os.environ.get("NODEZILLA_PL_PATH", "").strip()
         if env_path:
             out.append(Path(env_path).expanduser())

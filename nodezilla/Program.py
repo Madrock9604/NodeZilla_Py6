@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+from .paths import user_pl_path
 
 programming_delay = 10
 
@@ -8,6 +9,8 @@ programming_delay = 10
 def _pl_read_candidates() -> list[Path]:
     """Return candidate locations for PL.txt in priority order."""
     out: list[Path] = []
+    # Primary user-writable location.
+    out.append(user_pl_path())
     env_path = os.environ.get("NODEZILLA_PL_PATH", "").strip()
     if env_path:
         out.append(Path(env_path).expanduser())
@@ -54,7 +57,7 @@ def _resolve_pl_for_write() -> Path:
         p = Path(env_path).expanduser()
         p.parent.mkdir(parents=True, exist_ok=True)
         return p
-    p = Path.home() / "Library" / "Application Support" / "NodeZilla" / "PL.txt"
+    p = user_pl_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
 

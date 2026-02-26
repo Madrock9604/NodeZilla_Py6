@@ -9,6 +9,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from nodezilla.main_window import MainWindow
+from nodezilla.paths import ensure_user_workspace
 
 
 def _startup_log_path() -> Path:
@@ -57,6 +58,7 @@ def main():
     sys.excepthook = _excepthook
 
     app = QApplication(sys.argv)
+    ensure_user_workspace()
     w = MainWindow()
     w.show()
     return app.exec()

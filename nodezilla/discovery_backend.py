@@ -147,6 +147,7 @@ class MockDiscoveryBackend(DiscoveryBackendAdapter):
         }
         self._supplies_recovering = False
         self._supplies_recovering = False
+        self._supplies_recovering = False
 
     def backend_name(self) -> str:
         return "Mock"
@@ -163,8 +164,11 @@ class MockDiscoveryBackend(DiscoveryBackendAdapter):
         if self._connected is None:
             return False, "No instrument is connected."
         device = self._connected
+        self._supplies_cfg["master_enabled"] = False
+        self._supplies_cfg["v_pos_v"] = 0.0
+        self._supplies_cfg["v_neg_v"] = 0.0
+        self._dio_mask = 0
         self._connected = None
-        self._dio_mask = _KEEP_IO12_ON_MASK
         self.connection_changed.emit(False, f"Disconnected from {device}.")
         return True, f"Disconnected from {device}."
 
@@ -184,6 +188,9 @@ class MockDiscoveryBackend(DiscoveryBackendAdapter):
             return False, "Connect a device first."
         if tool_key == "supplies":
             self._supplies_cfg["master_enabled"] = False
+            self._supplies_cfg["v_pos_v"] = 0.0
+            self._supplies_cfg["v_neg_v"] = 0.0
+            self._dio_mask = 0
             return True, "Supplies master disabled (mock)."
         return True, f"{tool_key}: stopped (mock)"
 
@@ -258,6 +265,9 @@ class MockDiscoveryBackend(DiscoveryBackendAdapter):
     ) -> tuple[bool, str]:
         if self._connected is None:
             return False, "Connect a device first."
+        if not master_enabled:
+            v_pos_v = 0.0
+            v_neg_v = 0.0
         self._supplies_cfg = {
             "master_enabled": bool(master_enabled),
             "v_pos_v": float(v_pos_v),
@@ -466,6 +476,19 @@ class DwfDiscoveryBackend(DiscoveryBackendAdapter):
         if self._connected is None:
             return False, "No instrument is connected."
         device = self._connected
+        # Best effort: shut rails fully off to 0 V before closing device.
+        try:
+            cfg = dict(self._supplies_cfg)
+            cfg["master_enabled"] = False
+            cfg["v_pos_v"] = 0.0
+            cfg["v_neg_v"] = 0.0
+            self.configure_supplies(**cfg)
+        except Exception:
+            pass
+        try:
+            self._dio_force_all_low()
+        except Exception:
+            pass
         if self._hdwf.value != 0:
             self._dwf.FDwfDeviceClose(self._hdwf)
         self._hdwf = c_int(0)
@@ -473,8 +496,11 @@ class DwfDiscoveryBackend(DiscoveryBackendAdapter):
         self._scope_configured = False
         self._scope_ch2_enabled = False
         self._wavegen_configured = False
+        self._supplies_cfg["master_enabled"] = False
+        self._supplies_cfg["v_pos_v"] = 0.0
+        self._supplies_cfg["v_neg_v"] = 0.0
         self._dio_initialized = False
-        self._dio_mask = _KEEP_IO12_ON_MASK
+        self._dio_mask = 0
         self.connection_changed.emit(False, f"Disconnected from {device}.")
         return True, f"Disconnected from {device}."
 
@@ -656,7 +682,11 @@ class DwfDiscoveryBackend(DiscoveryBackendAdapter):
         if tool_key == "supplies":
             cfg = dict(self._supplies_cfg)
             cfg["master_enabled"] = False
-            return self.configure_supplies(**cfg)
+            cfg["v_pos_v"] = 0.0
+            cfg["v_neg_v"] = 0.0
+            ok, msg = self.configure_supplies(**cfg)
+            self._dio_force_all_low()
+            return ok, msg
         return True, f"{tool_key}: no live command yet."
 
     def configure_supplies(
@@ -672,6 +702,9 @@ class DwfDiscoveryBackend(DiscoveryBackendAdapter):
             return False, "Digilent runtime (libdwf) not found."
         if self._connected is None or self._hdwf.value == 0:
             return False, "Connect a device first."
+        if not master_enabled:
+            v_pos_v = 0.0
+            v_neg_v = 0.0
         # Best-effort AnalogIO mapping for AD2/AD3.
         if not hasattr(self._dwf, "FDwfAnalogIOEnableSet"):
             self._supplies_cfg = {
@@ -682,6 +715,21 @@ class DwfDiscoveryBackend(DiscoveryBackendAdapter):
                 "power_limit_w": float(power_limit_w),
             }
             return True, "Supplies configured (runtime has no AnalogIO controls; cached only)."
+
+        # Hard-off path: on some devices one rail can linger unless we clear
+        # multiple channel/node combinations before disabling AnalogIO.
+        if not master_enabled and hasattr(self._dwf, "FDwfAnalogIOChannelNodeSet"):
+            ok_off = self._force_supplies_off_hard()
+            self._supplies_cfg = {
+                "master_enabled": False,
+                "v_pos_v": 0.0,
+                "v_neg_v": 0.0,
+                "tracking": bool(tracking),
+                "power_limit_w": float(power_limit_w),
+            }
+            if ok_off:
+                return True, "Supplies disabled: rails forced to 0 V."
+            return False, f"Supplies disable failed: {self._last_error()}"
 
         ok = True
         if hasattr(self._dwf, "FDwfAnalogIOReset"):
@@ -731,6 +779,53 @@ class DwfDiscoveryBackend(DiscoveryBackendAdapter):
             f"V+={float(v_pos_v):.3f}V, V-={float(v_neg_v):.3f}V, "
             f"tracking={'on' if tracking else 'off'}, limit={float(power_limit_w):.2f}W"
         )
+
+    def _force_supplies_off_hard(self) -> bool:
+        if self._dwf is None or self._connected is None or self._hdwf.value == 0:
+            return False
+        ok = True
+        if hasattr(self._dwf, "FDwfAnalogIOReset"):
+            ok = bool(ok and self._dwf.FDwfAnalogIOReset(self._hdwf))
+        if hasattr(self._dwf, "FDwfAnalogIOEnableSet"):
+            ok = bool(ok and self._dwf.FDwfAnalogIOEnableSet(self._hdwf, c_bool(True)))
+        # Clear a broad set of channel/node pairs to 0.
+        if hasattr(self._dwf, "FDwfAnalogIOChannelNodeSet"):
+            for ch in range(0, 8):
+                for node in range(0, 16):
+                    try:
+                        self._dwf.FDwfAnalogIOChannelNodeSet(self._hdwf, c_int(ch), c_int(node), c_double(0.0))
+                    except Exception:
+                        continue
+        if hasattr(self._dwf, "FDwfAnalogIOConfigure"):
+            ok = bool(ok and self._dwf.FDwfAnalogIOConfigure(self._hdwf))
+        # Explicitly disable AnalogIO after programming zeros.
+        if hasattr(self._dwf, "FDwfAnalogIOEnableSet"):
+            ok = bool(ok and self._dwf.FDwfAnalogIOEnableSet(self._hdwf, c_bool(False)))
+        if hasattr(self._dwf, "FDwfAnalogIOConfigure"):
+            ok = bool(ok and self._dwf.FDwfAnalogIOConfigure(self._hdwf))
+        # One more pass improves reliability on some AD3 firmware/runtime combos.
+        time.sleep(0.03)
+        if hasattr(self._dwf, "FDwfAnalogIOEnableSet"):
+            ok = bool(ok and self._dwf.FDwfAnalogIOEnableSet(self._hdwf, c_bool(False)))
+        if hasattr(self._dwf, "FDwfAnalogIOConfigure"):
+            ok = bool(ok and self._dwf.FDwfAnalogIOConfigure(self._hdwf))
+        return bool(ok)
+
+    def _dio_force_all_low(self):
+        """Force all digital outputs low (including IO12) to avoid leakage paths."""
+        if self._dwf is None or self._connected is None or self._hdwf.value == 0:
+            return
+        if not all(
+            hasattr(self._dwf, n)
+            for n in ("FDwfDigitalIOOutputEnableSet", "FDwfDigitalIOOutputSet", "FDwfDigitalIOConfigure")
+        ):
+            return
+        if hasattr(self._dwf, "FDwfDigitalIOReset"):
+            self._dwf.FDwfDigitalIOReset(self._hdwf)
+        self._dwf.FDwfDigitalIOOutputEnableSet(self._hdwf, c_int(0xFFFF))
+        self._dwf.FDwfDigitalIOOutputSet(self._hdwf, c_int(0))
+        self._dwf.FDwfDigitalIOConfigure(self._hdwf)
+        self._dio_mask = 0
 
     def read_supplies_status(self) -> tuple[bool, str, Dict[str, float]]:
         if self._dwf is None:
