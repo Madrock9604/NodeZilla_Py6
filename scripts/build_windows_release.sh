@@ -83,8 +83,23 @@ EOF
 
 echo "[3/4] Creating portable zip..."
 rm -f "$ZIP_PATH"
-powershell.exe -NoProfile -Command \
-  "Compress-Archive -Path '$APP_STAGE_DIR','${PKG_DIR}/README_FIRST_RUN.txt' -DestinationPath '$ZIP_PATH' -Force" >/dev/null
+"$PYTHON_BIN" - <<PY
+from pathlib import Path
+from zipfile import ZipFile, ZIP_DEFLATED
+
+app_dir = Path(r"$APP_STAGE_DIR")
+readme = Path(r"$PKG_DIR") / "README_FIRST_RUN.txt"
+zip_path = Path(r"$ZIP_PATH")
+zip_path.parent.mkdir(parents=True, exist_ok=True)
+
+with ZipFile(zip_path, "w", compression=ZIP_DEFLATED) as zf:
+    if readme.exists():
+        zf.write(readme, arcname=readme.name)
+    root_name = app_dir.name
+    for p in app_dir.rglob("*"):
+        if p.is_file():
+            zf.write(p, arcname=str(Path(root_name) / p.relative_to(app_dir)))
+PY
 
 echo "[4/4] Building installer with Inno Setup..."
 ISCC_EXE="$(find_iscc || true)"
