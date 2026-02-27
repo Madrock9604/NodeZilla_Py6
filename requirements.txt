@@ -1,0 +1,6 @@
+# NodeZilla runtime dependencies
+PySide6>=6.8,<6.10
+
+# Packaging/build dependencies (used by release scripts)
+pyinstaller>=6.0
+pyinstaller-hooks-contrib>=2024.0
