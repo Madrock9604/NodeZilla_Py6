@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import ctypes
 import math
+import os
+from pathlib import Path
+import sys
 import time
 from ctypes import byref, c_bool, c_byte, c_char, c_double, c_int
 from ctypes.util import find_library
@@ -1065,7 +1068,32 @@ class DwfDiscoveryBackend(DiscoveryBackendAdapter):
             return "Unknown error"
 
     def _load_library(self):
+        def _log(msg: str):
+            try:
+                p = Path.home() / "Library" / "Logs" / "NodeZilla" / "startup.log"
+                p.parent.mkdir(parents=True, exist_ok=True)
+                with p.open("a", encoding="utf-8") as f:
+                    f.write(f"{msg}\n")
+            except Exception:
+                pass
+
+        exe = Path(sys.executable).resolve()
+        app_macos_dir = exe.parent
+        app_contents_dir = app_macos_dir.parent
+        app_resources_dir = app_contents_dir / "Resources"
+        app_frameworks_dir = app_contents_dir / "Frameworks"
+        env_lib = os.environ.get("NODEZILLA_DWF_LIB", "").strip()
         candidates = [
+            env_lib,
+            str(app_macos_dir / "dwf"),
+            str(app_macos_dir / "libdwf.dylib"),
+            str(app_macos_dir / "dwf.framework" / "dwf"),
+            str(app_resources_dir / "dwf"),
+            str(app_resources_dir / "libdwf.dylib"),
+            str(app_resources_dir / "dwf.framework" / "dwf"),
+            str(app_frameworks_dir / "dwf"),
+            str(app_frameworks_dir / "libdwf.dylib"),
+            str(app_frameworks_dir / "dwf.framework" / "dwf"),
             find_library("dwf"),
             "/Library/Frameworks/dwf.framework/dwf",
             "/usr/local/lib/libdwf.dylib",
@@ -1073,15 +1101,19 @@ class DwfDiscoveryBackend(DiscoveryBackendAdapter):
             "dwf.dll",
             "libdwf.so",
         ]
+        _log("[DWF] probing runtime candidates")
         for path in candidates:
             if not path:
                 continue
             try:
                 lib = ctypes.cdll.LoadLibrary(path)
                 self._configure_signatures(lib)
+                _log(f"[DWF] loaded runtime: {path}")
                 return lib
-            except Exception:
+            except Exception as e:
+                _log(f"[DWF] failed candidate: {path} :: {e}")
                 continue
+        _log("[DWF] runtime not found; falling back to Mock backend")
         return None
 
     @staticmethod

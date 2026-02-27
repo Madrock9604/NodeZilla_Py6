@@ -54,13 +54,7 @@ class FloatingToolIsland(QWidget):
         super().__init__(parent)
         self.setObjectName("FloatingToolIsland")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setStyleSheet(
-            "#FloatingToolIsland {"
-            "background: rgba(38, 38, 42, 215);"
-            "border: 1px solid rgba(120, 120, 130, 180);"
-            "border-radius: 12px;"
-            "}"
-        )
+        self._apply_theme_colors(None)
         self._widgets: List[QWidget] = []
         self._layout_orientation = "h"
         self._dragging = False
@@ -73,6 +67,26 @@ class FloatingToolIsland(QWidget):
         self._initialized = False
         self._rebuild_layout("h")
         self.parent().installEventFilter(self)
+
+    def _apply_theme_colors(self, theme):
+        if theme is None:
+            bg = QColor(38, 38, 42, 215)
+            border = QColor(120, 120, 130, 180)
+        else:
+            bg = QColor(theme.bg)
+            bg.setAlpha(220)
+            border = QColor(theme.text)
+            border.setAlpha(130)
+        self.setStyleSheet(
+            "#FloatingToolIsland {"
+            f"background: rgba({bg.red()}, {bg.green()}, {bg.blue()}, {bg.alpha()});"
+            f"border: 1px solid rgba({border.red()}, {border.green()}, {border.blue()}, {border.alpha()});"
+            "border-radius: 12px;"
+            "}"
+        )
+
+    def apply_theme(self, theme):
+        self._apply_theme_colors(theme)
 
     def add_controls(self, widgets: List[QWidget]):
         self._widgets = list(widgets)
@@ -358,12 +372,26 @@ class MainWindow(QMainWindow):
 
     def _apply_theme(self, theme):
         """Apply theme to scene items (deferred safely until UI exists)."""
+        if getattr(self, "_theme_apply_in_progress", False):
+            return
         # If UI not ready yet, try again on the next event loop tick
         if not hasattr(self, "schematic_tab") or self.schematic_tab is None:
             from PySide6.QtCore import QTimer
             QTimer.singleShot(0, lambda: self._apply_theme(theme))
             return
-        self.schematic_tab.scene.apply_theme(theme)
+        self._theme_apply_in_progress = True
+        try:
+            self.schematic_tab.scene.apply_theme(theme)
+            if hasattr(self, "_schematic_island") and self._schematic_island is not None:
+                self._schematic_island.apply_theme(theme)
+            for dlg in list(getattr(self, "_chip_editors", [])):
+                try:
+                    if dlg is not None and dlg.isVisible():
+                        dlg.apply_theme(theme)
+                except Exception:
+                    continue
+        finally:
+            self._theme_apply_in_progress = False
 
     def eventFilter(self, obj, event):
         if obj is self.schematic_tab.view.viewport():
@@ -1201,6 +1229,10 @@ class MainWindow(QMainWindow):
             grid_label, self._island_grid_spin, grid_minus_btn, grid_plus_btn,
             fit_btn, zoom_in_btn, zoom_out_btn, export_btn, runtime_btn,
         ])
+        try:
+            island.apply_theme(self._watcher.current_theme())
+        except Exception:
+            pass
         island.move(20, 20)
         island.show()
         QTimer.singleShot(0, island.reset_default_geometry)

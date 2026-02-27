@@ -6,18 +6,19 @@ import json
 from typing import List, Tuple, Optional
 
 from PySide6.QtCore import Qt, QPointF, QRectF, QSize, QLineF, QEvent
-from PySide6.QtGui import QPen, QPainterPath, QPainter, QAction
+from PySide6.QtGui import QPen, QPainterPath, QPainter, QAction, QColor
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QPushButton,
     QTableWidget, QTableWidgetItem, QGraphicsView, QGraphicsScene, QLabel, QWidget,
     QMessageBox, QSpinBox, QCheckBox, QGraphicsLineItem, QGraphicsRectItem,
     QGraphicsEllipseItem, QGraphicsPathItem, QGraphicsTextItem, QGraphicsItem,
-    QComboBox, QFileDialog
+    QComboBox, QFileDialog, QApplication
 )
 
 from .component_library import load_component_library, find_component_file
 from .graphics_items import COMP_WIDTH, COMP_HEIGHT
 from .paths import user_assets_root
+from .theme import ThemeWatcher
 
 
 # Custom symbol normalization target.
@@ -42,6 +43,8 @@ class _GridView(QGraphicsView):
         self.grid_on = True
         self.snap_on = True
         self.grid_size = 10
+        self.grid_minor_color = Qt.darkGray
+        self.grid_major_color = Qt.darkGray
 
     def snap_point(self, p: QPointF) -> QPointF:
         if not self.snap_on:
@@ -59,12 +62,12 @@ class _GridView(QGraphicsView):
         p.save()
         # Dotted grid with minor/major emphasis (major every 5 cells)
         major_step = g * 5
-        minor_pen = QPen(Qt.darkGray, 1)
+        minor_pen = QPen(self.grid_minor_color, 1)
         minor_pen.setCosmetic(True)
         minor_color = minor_pen.color()
         minor_color.setAlphaF(0.55)
         minor_pen.setColor(minor_color)
-        major_pen = QPen(Qt.darkGray, 2)
+        major_pen = QPen(self.grid_major_color, 2)
         major_pen.setCosmetic(True)
         major_color = major_pen.color()
         major_color.setAlphaF(0.85)
@@ -199,6 +202,8 @@ class CustomComponentDialog(QDialog):
         self._pin_index = 1
         self._pin_edge_snap = True
         self._pin_edge_tol = 8.0
+        self._symbol_pen_color = QApplication.instance().palette().text().color()
+        self._pin_label_color = self._symbol_pen_color
 
         root = QHBoxLayout(self)
 
@@ -374,6 +379,7 @@ class CustomComponentDialog(QDialog):
         self.view.viewport().installEventFilter(self)
         self._editing_kind: str | None = None
         self._editing_path: Path | None = None
+        self._theme_watcher = ThemeWatcher(QApplication.instance(), self._apply_editor_theme)
 
     def _sync_snap(self):
         self.view.snap_on = self.snap_chk.isChecked()
@@ -477,6 +483,47 @@ class CustomComponentDialog(QDialog):
     def _sync_type_fields(self):
         is_net = self.type_combo.currentText().lower().startswith("net")
         self.net_name_edit.setEnabled(is_net)
+
+    def _apply_editor_theme(self, theme):
+        bg = theme.bg
+        self.scene.setBackgroundBrush(bg)
+        luma = 0.2126 * bg.redF() + 0.7152 * bg.greenF() + 0.0722 * bg.blueF()
+        if luma > 0.5:
+            grid_minor = QColor(110, 110, 110)
+            grid_major = QColor(70, 70, 70)
+            symbol = QColor(25, 25, 25)
+            pin_label = QColor(30, 30, 30)
+        else:
+            grid_minor = QColor(170, 170, 170)
+            grid_major = QColor(220, 220, 220)
+            symbol = QColor(235, 235, 235)
+            pin_label = QColor(235, 235, 235)
+        self.view.grid_minor_color = grid_minor
+        self.view.grid_major_color = grid_major
+        self._symbol_pen_color = symbol
+        self._pin_label_color = pin_label
+        gp = self._guide_rect.pen()
+        gp.setColor(grid_major)
+        self._guide_rect.setPen(gp)
+
+        for it in self.scene.items():
+            self._apply_item_theme(it)
+        self.view.viewport().update()
+
+    def _apply_item_theme(self, item):
+        if item is self._guide_rect:
+            return
+        role = item.data(0)
+        if role == "symbol":
+            if hasattr(item, "pen"):
+                pen = item.pen()
+                pen.setColor(self._symbol_pen_color)
+                item.setPen(pen)
+        elif role == "pin":
+            if hasattr(item, "setPen"):
+                item.setPen(QPen(self._symbol_pen_color, 1))
+            if hasattr(item, "label"):
+                item.label.setDefaultTextColor(self._pin_label_color)
 
     def _set_tool(self, tool: str):
         """Set the active drawing tool and reset transient state."""
@@ -591,24 +638,29 @@ class CustomComponentDialog(QDialog):
         if item.data(0) == "pin":
             p = _PinItem(item.name, item.pos(), snap, self._pin_moved)
             self._pin_items.append(p)
+            self._apply_item_theme(p)
             return p
         if item is self._guide_rect:
             return None
         if isinstance(item, QGraphicsLineItem):
             it = _SnapLine(item.line(), snap)
             it.setRotation(item.rotation())
+            self._apply_item_theme(it)
             return it
         if isinstance(item, QGraphicsRectItem):
             it = _SnapRect(item.rect(), snap)
             it.setRotation(item.rotation())
+            self._apply_item_theme(it)
             return it
         if isinstance(item, QGraphicsEllipseItem) and item.data(0) == "symbol":
             it = _SnapEllipse(item.rect(), snap)
             it.setRotation(item.rotation())
+            self._apply_item_theme(it)
             return it
         if isinstance(item, QGraphicsPathItem):
             it = _SnapPath(item.path(), snap)
             it.setRotation(item.rotation())
+            self._apply_item_theme(it)
             return it
         return None
 
@@ -645,24 +697,28 @@ class CustomComponentDialog(QDialog):
             pin = _PinItem(payload.get("name", self._next_pin_name()), pos, snap, self._pin_moved)
             self.scene.addItem(pin)
             self._pin_items.append(pin)
+            self._apply_item_theme(pin)
             return
         if t == "line":
             x1, y1, x2, y2 = payload["line"]
             it = _SnapLine(QLineF(QPointF(x1, y1) + offset, QPointF(x2, y2) + offset), snap)
             it.setRotation(payload.get("rot", 0))
             self.scene.addItem(it)
+            self._apply_item_theme(it)
             return
         if t == "rect":
             x, y, w, h = payload["rect"]
             it = _SnapRect(QRectF(x + offset.x(), y + offset.y(), w, h), snap)
             it.setRotation(payload.get("rot", 0))
             self.scene.addItem(it)
+            self._apply_item_theme(it)
             return
         if t == "ellipse":
             x, y, w, h = payload["rect"]
             it = _SnapEllipse(QRectF(x + offset.x(), y + offset.y(), w, h), snap)
             it.setRotation(payload.get("rot", 0))
             self.scene.addItem(it)
+            self._apply_item_theme(it)
             return
         if t == "path":
             pts = payload.get("points", [])
@@ -673,6 +729,7 @@ class CustomComponentDialog(QDialog):
                 it = _SnapPath(path, snap)
                 it.setRotation(payload.get("rot", 0))
                 self.scene.addItem(it)
+                self._apply_item_theme(it)
             return
 
     def _export_symbol_json(self, json_path: Path):
@@ -887,12 +944,15 @@ class CustomComponentDialog(QDialog):
                         if t == "line":
                             it = _SnapLine(QLineF(shape["x1"], shape["y1"], shape["x2"], shape["y2"]), self.view.snap_point)
                             self.scene.addItem(it)
+                            self._apply_item_theme(it)
                         elif t == "rect":
                             it = _SnapRect(QRectF(shape["x"], shape["y"], shape["w"], shape["h"]), self.view.snap_point)
                             self.scene.addItem(it)
+                            self._apply_item_theme(it)
                         elif t == "ellipse":
                             it = _SnapEllipse(QRectF(shape["x"], shape["y"], shape["w"], shape["h"]), self.view.snap_point)
                             self.scene.addItem(it)
+                            self._apply_item_theme(it)
                         elif t == "polyline":
                             pts = shape.get("points", [])
                             if pts:
@@ -901,6 +961,7 @@ class CustomComponentDialog(QDialog):
                                     path.lineTo(x, y)
                                 it = _SnapPath(path, self.view.snap_point)
                                 self.scene.addItem(it)
+                                self._apply_item_theme(it)
                 except Exception:
                     pass
 
@@ -910,6 +971,7 @@ class CustomComponentDialog(QDialog):
                 pin = _PinItem(str(p.get("name", "P")), pos, self.view.snap_point, self._pin_moved)
                 self.scene.addItem(pin)
                 self._pin_items.append(pin)
+                self._apply_item_theme(pin)
             except Exception:
                 pass
         if self._pin_items:
@@ -998,22 +1060,26 @@ class CustomComponentDialog(QDialog):
                         pin = _PinItem(self._next_pin_name(), pos, self.view.snap_point, self._pin_moved)
                         self.scene.addItem(pin)
                         self._pin_items.append(pin)
+                        self._apply_item_theme(pin)
                         self._refresh_pin_table()
                         return True
                     if self._tool == "line":
                         self._start = pos
                         self._active_item = _SnapLine(QLineF(pos, pos), self.view.snap_point)
                         self.scene.addItem(self._active_item)
+                        self._apply_item_theme(self._active_item)
                         return True
                     if self._tool == "rect":
                         self._start = pos
                         self._active_item = _SnapRect(QRectF(pos, pos), self.view.snap_point)
                         self.scene.addItem(self._active_item)
+                        self._apply_item_theme(self._active_item)
                         return True
                     if self._tool == "ellipse":
                         self._start = pos
                         self._active_item = _SnapEllipse(QRectF(pos, pos), self.view.snap_point)
                         self.scene.addItem(self._active_item)
+                        self._apply_item_theme(self._active_item)
                         return True
                     if self._tool == "poly":
                         if not self._poly_points:
@@ -1021,6 +1087,7 @@ class CustomComponentDialog(QDialog):
                             path = QPainterPath(pos)
                             self._poly_item = _SnapPath(path, self.view.snap_point)
                             self.scene.addItem(self._poly_item)
+                            self._apply_item_theme(self._poly_item)
                         else:
                             self._poly_points.append(pos)
                         return True

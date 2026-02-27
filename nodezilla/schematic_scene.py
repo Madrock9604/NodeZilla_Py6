@@ -73,6 +73,12 @@ class SchematicScene(QGraphicsScene):
         """Remember theme, recolor bg/grid, and propagate to items."""
         self.theme = theme
         self.setBackgroundBrush(theme.bg)
+        # Keep grid dots visible in both light/dark modes.
+        grid_col = self._grid_color_for_background(theme.bg)
+        self._grid_pen_lines = QPen(grid_col, 0)
+        self._grid_pen_lines.setCosmetic(True)
+        self._grid_pen_dots = QPen(grid_col, 2)
+        self._grid_pen_dots.setCosmetic(True)
 
         # (grid pens, if you have them — keep as-is or derive from theme)
         # self._grid_pen_lines = QPen(theme.component_stroke, 0); self._grid_pen_lines.setCosmetic(True)
@@ -81,8 +87,18 @@ class SchematicScene(QGraphicsScene):
         for it in self.items():
             if hasattr(it, "apply_theme"):
                 it.apply_theme(theme)
+        if self._temp_dash is not None:
+            pen = self._temp_dash.pen()
+            pen.setColor(theme.wire_selected)
+            self._temp_dash.setPen(pen)
         self.update()
         self._rebuild_junction_markers()
+
+    @staticmethod
+    def _grid_color_for_background(bg: QColor) -> QColor:
+        luma = 0.2126 * bg.redF() + 0.7152 * bg.greenF() + 0.0722 * bg.blueF()
+        # Darker grid on light backgrounds, lighter grid on dark backgrounds.
+        return QColor(96, 96, 96) if luma > 0.5 else QColor(175, 175, 175)
 
     def _schedule_nets_changed(self):
         if self._net_update_pending:

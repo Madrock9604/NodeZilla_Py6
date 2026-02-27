@@ -75,13 +75,29 @@ class ThemeWatcher(QObject):
         super().__init__()
         self._app = app
         self._callback = on_theme_changed
+        self._last_theme_name: str | None = None
+        self._in_callback = False
         app.installEventFilter(self)
         # initial apply
-        self._callback(self.current_theme())
+        self._emit_if_changed(force=True)
 
     def current_theme(self) -> Theme:
         """Return the active Theme based on current OS/application scheme."""
         return DARK if detect_dark_mode(self._app) else LIGHT
+
+    def _emit_if_changed(self, force: bool = False):
+        theme = self.current_theme()
+        name = getattr(theme, "name", None)
+        if not force and name == self._last_theme_name:
+            return
+        if self._in_callback:
+            return
+        self._in_callback = True
+        try:
+            self._callback(theme)
+            self._last_theme_name = name
+        finally:
+            self._in_callback = False
 
     def eventFilter(self, obj, event):
         """React to palette/style changes and re-apply theme."""
@@ -90,5 +106,5 @@ class ThemeWatcher(QObject):
             QEvent.Type.PaletteChange,
             QEvent.Type.StyleChange,
         ):
-            self._callback(self.current_theme())
+            self._emit_if_changed(force=False)
         return super().eventFilter(obj, event)

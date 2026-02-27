@@ -28,19 +28,34 @@ class _ChipToolIsland(QWidget):
         super().__init__(parent)
         self.setObjectName("ChipToolIsland")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setStyleSheet(
-            "#ChipToolIsland {"
-            "background: rgba(38, 38, 42, 215);"
-            "border: 1px solid rgba(120, 120, 130, 180);"
-            "border-radius: 10px;"
-            "}"
-        )
+        self._apply_theme_colors(None)
         from PySide6.QtWidgets import QGridLayout
         self._layout = QGridLayout(self)
         self._layout.setContentsMargins(8, 6, 8, 6)
         self._layout.setSpacing(6)
         self._widgets = []
         parent.installEventFilter(self)
+
+    def _apply_theme_colors(self, theme):
+        from PySide6.QtGui import QColor
+        if theme is None:
+            bg = QColor(38, 38, 42, 215)
+            border = QColor(120, 120, 130, 180)
+        else:
+            bg = QColor(theme.bg)
+            bg.setAlpha(220)
+            border = QColor(theme.text)
+            border.setAlpha(130)
+        self.setStyleSheet(
+            "#ChipToolIsland {"
+            f"background: rgba({bg.red()}, {bg.green()}, {bg.blue()}, {bg.alpha()});"
+            f"border: 1px solid rgba({border.red()}, {border.green()}, {border.blue()}, {border.alpha()});"
+            "border-radius: 10px;"
+            "}"
+        )
+
+    def apply_theme(self, theme):
+        self._apply_theme_colors(theme)
 
     def set_controls(self, widgets):
         self._widgets = list(widgets)
@@ -146,7 +161,7 @@ class ChipEditorDialog(QDialog):
         parent_scene = component.scene()
         parent_theme = getattr(parent_scene, "theme", None)
         if parent_theme is not None:
-            self.scene.apply_theme(parent_theme)
+            self.apply_theme(parent_theme)
         self.scene.grid_size = int(getattr(parent_scene, "grid_size", 20))
         self.scene.grid_on = bool(getattr(parent_scene, "grid_on", True))
         self.scene.snap_on = bool(getattr(parent_scene, "snap_on", True))
@@ -163,6 +178,11 @@ class ChipEditorDialog(QDialog):
         self.view.viewport().installEventFilter(self)
         self.view.horizontalScrollBar().valueChanged.connect(lambda _v: self._tool_island.reset_default_geometry())
         self.view.verticalScrollBar().valueChanged.connect(lambda _v: self._tool_island.reset_default_geometry())
+
+    def apply_theme(self, theme):
+        self.scene.apply_theme(theme)
+        if hasattr(self, "_tool_island") and self._tool_island is not None:
+            self._tool_island.apply_theme(theme)
 
     def _build_tool_island(self):
         island = _ChipToolIsland(self.view.viewport())
