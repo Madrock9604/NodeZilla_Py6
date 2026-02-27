@@ -31,6 +31,13 @@ INSTALLER_PATH="$PKG_DIR/${APP_NAME}-Windows-Setup.exe"
 
 mkdir -p "$BUILD_DIR" "$DIST_DIR" "$SPEC_DIR" "$PKG_DIR" "$STAGE_DIR"
 
+# PyInstaller is executed by Windows Python, so pass Windows-native paths.
+ROOT_DIR_WIN="$(cygpath -w "$ROOT_DIR")"
+BUILD_DIR_WIN="$(cygpath -w "$BUILD_DIR")"
+DIST_DIR_WIN="$(cygpath -w "$DIST_DIR")"
+SPEC_DIR_WIN="$(cygpath -w "$SPEC_DIR")"
+RUN_PY_WIN="$(cygpath -w "$ROOT_DIR/run.py")"
+
 find_iscc() {
   local candidates=(
     "/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
@@ -48,13 +55,13 @@ echo "[1/4] Building Windows app with PyInstaller..."
   --noconfirm --clean --windowed \
   --name "$APP_NAME" \
   --collect-all PySide6 \
-  --add-data "$ROOT_DIR/assets;assets" \
-  --add-data "$ROOT_DIR/Examples;Examples" \
-  --add-data "$ROOT_DIR/PL.txt;." \
-  --workpath "$BUILD_DIR" \
-  --distpath "$DIST_DIR" \
-  --specpath "$SPEC_DIR" \
-  "$ROOT_DIR/run.py"
+  --add-data "$ROOT_DIR_WIN\\assets;assets" \
+  --add-data "$ROOT_DIR_WIN\\Examples;Examples" \
+  --add-data "$ROOT_DIR_WIN\\PL.txt;." \
+  --workpath "$BUILD_DIR_WIN" \
+  --distpath "$DIST_DIR_WIN" \
+  --specpath "$SPEC_DIR_WIN" \
+  "$RUN_PY_WIN"
 
 echo "[2/4] Staging app files..."
 rm -rf "$APP_STAGE_DIR"
