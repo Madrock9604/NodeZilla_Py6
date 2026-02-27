@@ -100,13 +100,15 @@ fi
 APP_STAGE_DIR_WIN="$(cygpath -w "$APP_STAGE_DIR")"
 PKG_DIR_WIN="$(cygpath -w "$PKG_DIR")"
 INSTALLER_PATH_WIN="$(cygpath -w "$INSTALLER_PATH")"
+APP_STAGE_DIR_ISS="$(cygpath -m "$APP_STAGE_DIR")"
+PKG_DIR_ISS="$(cygpath -m "$PKG_DIR")"
 
 cat > "$ISS_PATH" <<EOF
 #define AppName "${APP_NAME}"
 #define AppVersion "${APP_VERSION}"
 #define AppPublisher "NodeZilla"
 #define AppExeName "NodeZilla.exe"
-#define AppSource "${APP_STAGE_DIR_WIN}"
+#define AppSource "${APP_STAGE_DIR_ISS}"
 
 [Setup]
 AppId={{A5D36E8F-B7A4-4A3A-BD3D-5E613B5C4401}
@@ -116,7 +118,7 @@ AppPublisher={#AppPublisher}
 DefaultDirName={autopf}\\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
-OutputDir=${PKG_DIR_WIN}
+OutputDir=${PKG_DIR_ISS}
 OutputBaseFilename=${APP_NAME}-Windows-Setup
 Compression=lzma
 SolidCompression=yes
@@ -140,11 +142,18 @@ Name: "{autodesktop}\\{#AppName}"; Filename: "{app}\\{#AppExeName}"; Tasks: desk
 Filename: "{app}\\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
 EOF
 
-"$ISCC_EXE" "$ISS_PATH" >/dev/null
+"$ISCC_EXE" "$ISS_PATH"
 
 GENERATED_INSTALLER="$PKG_DIR/${APP_NAME}-Windows-Setup.exe"
 if [[ -f "$GENERATED_INSTALLER" && "$GENERATED_INSTALLER" != "$INSTALLER_PATH" ]]; then
   mv -f "$GENERATED_INSTALLER" "$INSTALLER_PATH"
+fi
+
+if [[ ! -f "$INSTALLER_PATH" ]]; then
+  echo "ERROR: Inno Setup finished but installer was not created." >&2
+  echo "Expected: $INSTALLER_PATH" >&2
+  echo "Check ISCC output above for details." >&2
+  exit 1
 fi
 
 echo
