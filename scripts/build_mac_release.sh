@@ -25,6 +25,7 @@ SPEC_DIR="$RELEASE_ROOT/pyi_spec"
 PKG_DIR="$RELEASE_ROOT/release"
 ZIP_PATH="$PKG_DIR/${APP_NAME}-macOS.zip"
 INSTALLER_STAGE="$RELEASE_ROOT/pkg_stage"
+INSTALLER_STAGE_APP="$RELEASE_ROOT/pkg_stage_app"
 INSTALLER_PATH="$PKG_DIR/${APP_NAME}-macOS.pkg"
 INSTALLER_SCRIPTS="$RELEASE_ROOT/pkg_scripts"
 
@@ -154,10 +155,13 @@ rm -f "$ZIP_PATH"
 
 echo "[4/4] Creating macOS installer (.pkg)..."
 rm -rf "$INSTALLER_STAGE"
+rm -rf "$INSTALLER_STAGE_APP"
 rm -rf "$INSTALLER_SCRIPTS"
 mkdir -p "$INSTALLER_STAGE/Applications"
+mkdir -p "$INSTALLER_STAGE_APP"
 mkdir -p "$INSTALLER_SCRIPTS"
 cp -R "$PKG_DIR/$APP_NAME.app" "$INSTALLER_STAGE/Applications/$APP_NAME.app"
+cp -R "$PKG_DIR/$APP_NAME.app" "$INSTALLER_STAGE_APP/$APP_NAME.app"
 
 cat > "$INSTALLER_SCRIPTS/postinstall" <<'EOF'
 #!/bin/bash
@@ -248,11 +252,11 @@ EOF
 
 rm -f "$INSTALLER_PATH"
 /usr/bin/pkgbuild \
-  --root "$INSTALLER_STAGE" \
+  --root "$INSTALLER_STAGE_APP" \
   --scripts "$INSTALLER_SCRIPTS" \
   --identifier "com.nodezilla.app" \
   --version "$APP_VERSION" \
-  --install-location "/" \
+  --install-location "/Applications" \
   "$INSTALLER_PATH"
 
 echo
