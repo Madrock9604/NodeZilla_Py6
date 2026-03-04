@@ -28,6 +28,8 @@ INSTALLER_STAGE="$RELEASE_ROOT/pkg_stage"
 INSTALLER_STAGE_APP="$RELEASE_ROOT/pkg_stage_app"
 INSTALLER_PATH="$PKG_DIR/${APP_NAME}-macOS.pkg"
 INSTALLER_SCRIPTS="$RELEASE_ROOT/pkg_scripts"
+DMG_STAGE="$RELEASE_ROOT/dmg_stage"
+DMG_PATH="$PKG_DIR/${APP_NAME}-macOS.dmg"
 
 mkdir -p "$BUILD_DIR" "$DIST_DIR" "$SPEC_DIR" "$PKG_DIR"
 
@@ -153,7 +155,7 @@ echo "[3/4] Creating zip..."
 rm -f "$ZIP_PATH"
 (cd "$PKG_DIR" && /usr/bin/zip -r "$ZIP_PATH" "$APP_NAME.app" "README_FIRST_RUN.txt" >/dev/null)
 
-echo "[4/4] Creating macOS installer (.pkg)..."
+echo "[4/5] Creating macOS installer (.pkg)..."
 rm -rf "$INSTALLER_STAGE"
 rm -rf "$INSTALLER_STAGE_APP"
 rm -rf "$INSTALLER_SCRIPTS"
@@ -259,8 +261,22 @@ rm -f "$INSTALLER_PATH"
   --install-location "/Applications" \
   "$INSTALLER_PATH"
 
+echo "[5/5] Creating macOS disk image (.dmg)..."
+rm -rf "$DMG_STAGE"
+mkdir -p "$DMG_STAGE"
+cp -R "$PKG_DIR/$APP_NAME.app" "$DMG_STAGE/$APP_NAME.app"
+ln -s /Applications "$DMG_STAGE/Applications"
+rm -f "$DMG_PATH"
+/usr/bin/hdiutil create \
+  -volname "$APP_NAME" \
+  -srcfolder "$DMG_STAGE" \
+  -ov \
+  -format UDZO \
+  "$DMG_PATH"
+
 echo
 echo "Build complete."
 echo "App: $PKG_DIR/$APP_NAME.app"
 echo "Zip: $ZIP_PATH"
 echo "Installer: $INSTALLER_PATH"
+echo "DMG: $DMG_PATH"
