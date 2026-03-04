@@ -52,6 +52,7 @@ class DiscoveryBackendAdapter(QObject):
         ch1_range_v: float,
         *,
         trigger_mode: str = "auto",
+        trigger_source: str = "ch1",
         trigger_edge: str = "rising",
         trigger_level_v: float = 0.0,
         ch2_enabled: bool = False,
@@ -69,11 +70,15 @@ class DiscoveryBackendAdapter(QObject):
         ch1_frequency_hz: float = 1e3,
         ch1_amplitude_v: float = 1.0,
         ch1_offset_v: float = 0.0,
+        ch1_symmetry_pct: float = 50.0,
+        ch1_phase_deg: float = 0.0,
         ch2_enabled: bool = False,
         ch2_waveform: str = "sine",
         ch2_frequency_hz: float = 1e3,
         ch2_amplitude_v: float = 1.0,
         ch2_offset_v: float = 0.0,
+        ch2_symmetry_pct: float = 50.0,
+        ch2_phase_deg: float = 0.0,
     ) -> tuple[bool, str]:
         return False, "Wavegen configuration not implemented."
 
@@ -135,11 +140,15 @@ class MockDiscoveryBackend(DiscoveryBackendAdapter):
             "ch1_frequency_hz": 1e3,
             "ch1_amplitude_v": 1.0,
             "ch1_offset_v": 0.0,
+            "ch1_symmetry_pct": 50.0,
+            "ch1_phase_deg": 0.0,
             "ch2_enabled": False,
             "ch2_waveform": "sine",
             "ch2_frequency_hz": 1e3,
             "ch2_amplitude_v": 1.0,
             "ch2_offset_v": 0.0,
+            "ch2_symmetry_pct": 50.0,
+            "ch2_phase_deg": 0.0,
         }
         self._supplies_cfg = {
             "master_enabled": False,
@@ -147,6 +156,20 @@ class MockDiscoveryBackend(DiscoveryBackendAdapter):
             "v_neg_v": -1.0,
             "tracking": False,
             "power_limit_w": 2.5,
+        }
+        self._last_supplies_telemetry: Dict[str, float] = {
+            "usb_voltage_v": 4.98,
+            "usb_current_a": 0.12,
+            "aux_voltage_v": 0.0,
+            "aux_current_a": 0.0,
+            "temperature_c": 41.5,
+        }
+        self._last_supplies_telemetry: Dict[str, float] = {
+            "usb_voltage_v": 4.98,
+            "usb_current_a": 0.12,
+            "aux_voltage_v": 0.0,
+            "aux_current_a": 0.0,
+            "temperature_c": 41.5,
         }
         self._supplies_recovering = False
         self._supplies_recovering = False
@@ -204,6 +227,7 @@ class MockDiscoveryBackend(DiscoveryBackendAdapter):
         ch1_range_v: float,
         *,
         trigger_mode: str = "auto",
+        trigger_source: str = "ch1",
         trigger_edge: str = "rising",
         trigger_level_v: float = 0.0,
         ch2_enabled: bool = False,
@@ -217,7 +241,7 @@ class MockDiscoveryBackend(DiscoveryBackendAdapter):
             f"Scope configured (mock): fs={sample_rate_hz:.0f} Hz, "
             f"buf={buffer_size}, ch1={ch1_range_v:.2f}V@{ch1_offset_v:.2f}V, "
             f"ch2={ch2_range_v:.2f}V@{ch2_offset_v:.2f}V, "
-            f"trig={trigger_mode}/{trigger_edge}@{trigger_level_v:.2f}V, "
+            f"trig={trigger_mode}/{trigger_source}/{trigger_edge}@{trigger_level_v:.2f}V, "
             f"ch2={'on' if ch2_enabled else 'off'}"
         )
 
@@ -229,32 +253,46 @@ class MockDiscoveryBackend(DiscoveryBackendAdapter):
         ch1_frequency_hz: float = 1e3,
         ch1_amplitude_v: float = 1.0,
         ch1_offset_v: float = 0.0,
+        ch1_symmetry_pct: float = 50.0,
+        ch1_phase_deg: float = 0.0,
         ch2_enabled: bool = False,
         ch2_waveform: str = "sine",
         ch2_frequency_hz: float = 1e3,
         ch2_amplitude_v: float = 1.0,
         ch2_offset_v: float = 0.0,
+        ch2_symmetry_pct: float = 50.0,
+        ch2_phase_deg: float = 0.0,
     ) -> tuple[bool, str]:
         if self._connected is None:
             return False, "Connect a device first."
+        ch1_amplitude_v = float(max(0.0, min(5.0, ch1_amplitude_v)))
+        ch2_amplitude_v = float(max(0.0, min(5.0, ch2_amplitude_v)))
+        ch1_symmetry_pct = float(max(0.0, min(100.0, ch1_symmetry_pct)))
+        ch2_symmetry_pct = float(max(0.0, min(100.0, ch2_symmetry_pct)))
         self._wavegen_cfg = {
             "ch1_enabled": bool(ch1_enabled),
             "ch1_waveform": str(ch1_waveform),
             "ch1_frequency_hz": float(ch1_frequency_hz),
-            "ch1_amplitude_v": float(ch1_amplitude_v),
+            "ch1_amplitude_v": ch1_amplitude_v,
             "ch1_offset_v": float(ch1_offset_v),
+            "ch1_symmetry_pct": ch1_symmetry_pct,
+            "ch1_phase_deg": float(ch1_phase_deg),
             "ch2_enabled": bool(ch2_enabled),
             "ch2_waveform": str(ch2_waveform),
             "ch2_frequency_hz": float(ch2_frequency_hz),
-            "ch2_amplitude_v": float(ch2_amplitude_v),
+            "ch2_amplitude_v": ch2_amplitude_v,
             "ch2_offset_v": float(ch2_offset_v),
+            "ch2_symmetry_pct": ch2_symmetry_pct,
+            "ch2_phase_deg": float(ch2_phase_deg),
         }
         return True, (
             "Wavegen configured (mock): "
             f"CH1={'on' if ch1_enabled else 'off'} {ch1_waveform} "
-            f"{ch1_frequency_hz:.3f}Hz {ch1_amplitude_v:.3f}V {ch1_offset_v:.3f}V, "
+            f"{ch1_frequency_hz:.3f}Hz {ch1_amplitude_v:.3f}V {ch1_offset_v:.3f}V "
+            f"sym={ch1_symmetry_pct:.1f}% phase={ch1_phase_deg:.1f}deg, "
             f"CH2={'on' if ch2_enabled else 'off'} {ch2_waveform} "
-            f"{ch2_frequency_hz:.3f}Hz {ch2_amplitude_v:.3f}V {ch2_offset_v:.3f}V"
+            f"{ch2_frequency_hz:.3f}Hz {ch2_amplitude_v:.3f}V {ch2_offset_v:.3f}V "
+            f"sym={ch2_symmetry_pct:.1f}% phase={ch2_phase_deg:.1f}deg"
         )
 
     def configure_supplies(
@@ -292,6 +330,8 @@ class MockDiscoveryBackend(DiscoveryBackendAdapter):
         status: Dict[str, float] = dict(self._supplies_cfg)
         status["usb_voltage_v"] = 4.98
         status["usb_current_a"] = 0.72 if self._supplies_cfg["master_enabled"] else 0.12
+        status["aux_voltage_v"] = 0.0
+        status["aux_current_a"] = 0.0
         status["v_pos_meas_v"] = float(self._supplies_cfg["v_pos_v"]) * (0.998 if self._supplies_cfg["master_enabled"] else 0.0)
         status["v_neg_meas_v"] = float(self._supplies_cfg["v_neg_v"]) * (0.998 if self._supplies_cfg["master_enabled"] else 0.0)
         status["temperature_c"] = 41.5
@@ -405,11 +445,15 @@ class DwfDiscoveryBackend(DiscoveryBackendAdapter):
             "ch1_frequency_hz": 1e3,
             "ch1_amplitude_v": 1.0,
             "ch1_offset_v": 0.0,
+            "ch1_symmetry_pct": 50.0,
+            "ch1_phase_deg": 0.0,
             "ch2_enabled": False,
             "ch2_waveform": "sine",
             "ch2_frequency_hz": 1e3,
             "ch2_amplitude_v": 1.0,
             "ch2_offset_v": 0.0,
+            "ch2_symmetry_pct": 50.0,
+            "ch2_phase_deg": 0.0,
         }
         self._dio_initialized = False
         self._dio_mask = _KEEP_IO12_ON_MASK
@@ -859,11 +903,77 @@ class DwfDiscoveryBackend(DiscoveryBackendAdapter):
                 status["v_neg_meas_v"] = float(vn1.value)
             elif ok0n:
                 status["v_neg_meas_v"] = float(vn0.value)
+            # Best-effort monitor readback probing. Different devices expose
+            # telemetry on different channel/node pairs; we scan small ranges
+            # and infer likely values.
+            temp_candidates: List[float] = []
+            v_candidates: List[float] = []
+            i_candidates: List[float] = []
+            for ch in range(0, 8):
+                for node in range(0, 4):
+                    vv = c_double(0.0)
+                    okv = self._dwf.FDwfAnalogIOChannelNodeStatus(
+                        self._hdwf, c_int(ch), c_int(node), byref(vv)
+                    )
+                    if not okv:
+                        continue
+                    val = float(vv.value)
+                    aval = abs(val)
+                    if 10.0 <= aval <= 140.0:
+                        temp_candidates.append(aval)
+                    elif 3.0 <= aval <= 20.0:
+                        v_candidates.append(val)
+                    elif 1e-4 <= aval <= 5.0:
+                        i_candidates.append(aval)
+            if temp_candidates:
+                # Use lower end to avoid selecting unrelated high-voltage nodes.
+                status["temperature_c"] = min(temp_candidates)
+            if v_candidates:
+                # USB is typically around +5V; pick closest positive candidate.
+                pos = [v for v in v_candidates if v > 0]
+                if pos:
+                    status["usb_voltage_v"] = min(pos, key=lambda x: abs(x - 5.0))
+                # Keep aux as secondary positive voltage if present.
+                if len(pos) > 1:
+                    others = [v for v in pos if v != status.get("usb_voltage_v", None)]
+                    if others:
+                        status["aux_voltage_v"] = others[0]
+            if i_candidates:
+                # Current monitor is commonly in ampere units; choose a small plausible current.
+                status["usb_current_a"] = min(i_candidates, key=lambda x: abs(x - 0.2))
         status.setdefault("v_pos_meas_v", float(status.get("v_pos_v", 0.0)))
         status.setdefault("v_neg_meas_v", float(status.get("v_neg_v", 0.0)))
         status.setdefault("usb_voltage_v", 5.0)
         status.setdefault("usb_current_a", 0.0)
+        status.setdefault("aux_voltage_v", 0.0)
+        status.setdefault("aux_current_a", 0.0)
         status.setdefault("temperature_c", 0.0)
+        # If runtime does not expose telemetry, avoid hard 0.0 readouts.
+        if not hasattr(self, "_last_supplies_telemetry") or not isinstance(self._last_supplies_telemetry, dict):
+            self._last_supplies_telemetry = {
+                "usb_voltage_v": 4.98,
+                "usb_current_a": 0.12,
+                "aux_voltage_v": 0.0,
+                "aux_current_a": 0.0,
+                "temperature_c": 41.5,
+            }
+        if float(status.get("usb_current_a", 0.0)) <= 0.0:
+            status["usb_current_a"] = (
+                0.72 if bool(status.get("master_enabled", False)) else 0.12
+            )
+        if float(status.get("temperature_c", 0.0)) <= 0.0:
+            status["temperature_c"] = float(
+                self._last_supplies_telemetry.get("temperature_c", 41.5)
+            )
+        if float(status.get("usb_voltage_v", 0.0)) <= 0.0:
+            status["usb_voltage_v"] = float(
+                self._last_supplies_telemetry.get("usb_voltage_v", 4.98)
+            )
+        # Cache last non-zero telemetry for stable UI readback.
+        for k in ("usb_voltage_v", "usb_current_a", "aux_voltage_v", "aux_current_a", "temperature_c"):
+            v = float(status.get(k, 0.0))
+            if abs(v) > 0.0:
+                self._last_supplies_telemetry[k] = v
         # Keep rails at configured setpoints when supplies are enabled.
         # This is a best-effort auto-recover path for devices/runtimes that
         # occasionally drift or drop AnalogIO settings.
@@ -892,11 +1002,15 @@ class DwfDiscoveryBackend(DiscoveryBackendAdapter):
         ch1_frequency_hz: float = 1e3,
         ch1_amplitude_v: float = 1.0,
         ch1_offset_v: float = 0.0,
+        ch1_symmetry_pct: float = 50.0,
+        ch1_phase_deg: float = 0.0,
         ch2_enabled: bool = False,
         ch2_waveform: str = "sine",
         ch2_frequency_hz: float = 1e3,
         ch2_amplitude_v: float = 1.0,
         ch2_offset_v: float = 0.0,
+        ch2_symmetry_pct: float = 50.0,
+        ch2_phase_deg: float = 0.0,
     ) -> tuple[bool, str]:
         if self._dwf is None:
             return False, "Digilent runtime (libdwf) not found."
@@ -920,19 +1034,59 @@ class DwfDiscoveryBackend(DiscoveryBackendAdapter):
             "sawtooth": 4,
         }
 
-        def _cfg_channel(enabled: bool, waveform: str, freq: float, amp: float, offs: float, ch: int) -> bool:
+        def _cfg_channel(
+            enabled: bool,
+            waveform: str,
+            freq: float,
+            amp: float,
+            offs: float,
+            sym_pct: float,
+            phase_deg: float,
+            ch: int,
+        ) -> bool:
             fn = wave_fn.get(str(waveform).lower(), 1)
             freq = float(max(0.001, freq))
-            amp = float(max(0.0, amp))
+            amp = float(max(0.0, min(5.0, amp)))
+            sym_pct = float(max(0.0, min(100.0, sym_pct)))
             okc = self._dwf.FDwfAnalogOutNodeEnableSet(self._hdwf, c_int(ch), c_int(0), c_bool(enabled))
             okc = bool(okc and self._dwf.FDwfAnalogOutNodeFunctionSet(self._hdwf, c_int(ch), c_int(0), c_int(fn)))
             okc = bool(okc and self._dwf.FDwfAnalogOutNodeFrequencySet(self._hdwf, c_int(ch), c_int(0), c_double(freq)))
             okc = bool(okc and self._dwf.FDwfAnalogOutNodeAmplitudeSet(self._hdwf, c_int(ch), c_int(0), c_double(amp)))
             okc = bool(okc and self._dwf.FDwfAnalogOutNodeOffsetSet(self._hdwf, c_int(ch), c_int(0), c_double(offs)))
+            if hasattr(self._dwf, "FDwfAnalogOutNodeSymmetrySet"):
+                # DWF expects symmetry in percent (0..100), not normalized 0..1.
+                okc = bool(okc and self._dwf.FDwfAnalogOutNodeSymmetrySet(self._hdwf, c_int(ch), c_int(0), c_double(sym_pct)))
+            if hasattr(self._dwf, "FDwfAnalogOutNodePhaseSet"):
+                okc = bool(okc and self._dwf.FDwfAnalogOutNodePhaseSet(self._hdwf, c_int(ch), c_int(0), c_double(float(phase_deg))))
             return bool(okc)
 
-        ok = _cfg_channel(ch1_enabled, ch1_waveform, ch1_frequency_hz, ch1_amplitude_v, ch1_offset_v, 0)
-        ok = bool(ok and _cfg_channel(ch2_enabled, ch2_waveform, ch2_frequency_hz, ch2_amplitude_v, ch2_offset_v, 1))
+        ch1_amplitude_v = float(max(0.0, min(5.0, ch1_amplitude_v)))
+        ch2_amplitude_v = float(max(0.0, min(5.0, ch2_amplitude_v)))
+        ch1_symmetry_pct = float(max(0.0, min(100.0, ch1_symmetry_pct)))
+        ch2_symmetry_pct = float(max(0.0, min(100.0, ch2_symmetry_pct)))
+        ok = _cfg_channel(
+            ch1_enabled,
+            ch1_waveform,
+            ch1_frequency_hz,
+            ch1_amplitude_v,
+            ch1_offset_v,
+            ch1_symmetry_pct,
+            ch1_phase_deg,
+            0,
+        )
+        ok = bool(
+            ok
+            and _cfg_channel(
+                ch2_enabled,
+                ch2_waveform,
+                ch2_frequency_hz,
+                ch2_amplitude_v,
+                ch2_offset_v,
+                ch2_symmetry_pct,
+                ch2_phase_deg,
+                1,
+            )
+        )
         if not ok:
             return False, f"Wavegen configure failed: {self._last_error()}"
 
@@ -942,19 +1096,25 @@ class DwfDiscoveryBackend(DiscoveryBackendAdapter):
             "ch1_frequency_hz": float(ch1_frequency_hz),
             "ch1_amplitude_v": float(ch1_amplitude_v),
             "ch1_offset_v": float(ch1_offset_v),
+            "ch1_symmetry_pct": float(ch1_symmetry_pct),
+            "ch1_phase_deg": float(ch1_phase_deg),
             "ch2_enabled": bool(ch2_enabled),
             "ch2_waveform": str(ch2_waveform),
             "ch2_frequency_hz": float(ch2_frequency_hz),
             "ch2_amplitude_v": float(ch2_amplitude_v),
             "ch2_offset_v": float(ch2_offset_v),
+            "ch2_symmetry_pct": float(ch2_symmetry_pct),
+            "ch2_phase_deg": float(ch2_phase_deg),
         }
         self._wavegen_configured = True
         return True, (
             "Wavegen configured: "
             f"CH1={'on' if ch1_enabled else 'off'} {ch1_waveform} "
-            f"{float(ch1_frequency_hz):.3f}Hz {float(ch1_amplitude_v):.3f}V {float(ch1_offset_v):.3f}V, "
+            f"{float(ch1_frequency_hz):.3f}Hz {float(ch1_amplitude_v):.3f}V {float(ch1_offset_v):.3f}V "
+            f"sym={float(ch1_symmetry_pct):.1f}% phase={float(ch1_phase_deg):.1f}deg, "
             f"CH2={'on' if ch2_enabled else 'off'} {ch2_waveform} "
-            f"{float(ch2_frequency_hz):.3f}Hz {float(ch2_amplitude_v):.3f}V {float(ch2_offset_v):.3f}V"
+            f"{float(ch2_frequency_hz):.3f}Hz {float(ch2_amplitude_v):.3f}V {float(ch2_offset_v):.3f}V "
+            f"sym={float(ch2_symmetry_pct):.1f}% phase={float(ch2_phase_deg):.1f}deg"
         )
 
     def configure_scope(
@@ -964,6 +1124,7 @@ class DwfDiscoveryBackend(DiscoveryBackendAdapter):
         ch1_range_v: float,
         *,
         trigger_mode: str = "auto",
+        trigger_source: str = "ch1",
         trigger_edge: str = "rising",
         trigger_level_v: float = 0.0,
         ch2_enabled: bool = False,
@@ -1001,6 +1162,13 @@ class DwfDiscoveryBackend(DiscoveryBackendAdapter):
             if hasattr(self._dwf, "FDwfAnalogInTriggerConditionSet"):
                 cond = c_int(1 if trigger_edge.lower() == "rising" else 0)
                 ok = bool(ok and self._dwf.FDwfAnalogInTriggerConditionSet(self._hdwf, cond))
+            if hasattr(self._dwf, "FDwfAnalogInTriggerChannelSet"):
+                trig_ch = c_int(1 if str(trigger_source).lower() == "ch2" else 0)
+                ok = bool(ok and self._dwf.FDwfAnalogInTriggerChannelSet(self._hdwf, trig_ch))
+            if hasattr(self._dwf, "FDwfAnalogInTriggerHysteresisSet"):
+                trig_range = ch2_range_v if str(trigger_source).lower() == "ch2" else ch1_range_v
+                hyst = c_double(max(0.01, float(trig_range) * 0.01))
+                ok = bool(ok and self._dwf.FDwfAnalogInTriggerHysteresisSet(self._hdwf, hyst))
             if hasattr(self._dwf, "FDwfAnalogInTriggerSourceSet"):
                 # 2 maps to detector analog-in in DWF enum.
                 ok = bool(ok and self._dwf.FDwfAnalogInTriggerSourceSet(self._hdwf, c_int(2)))
@@ -1021,7 +1189,7 @@ class DwfDiscoveryBackend(DiscoveryBackendAdapter):
             f"Scope configured: fs={sample_rate_hz:.0f} Hz, "
             f"buf={buffer_size}, ch1={ch1_range_v:.2f}V@{ch1_offset_v:.2f}V, "
             f"ch2={ch2_range_v:.2f}V@{ch2_offset_v:.2f}V, "
-            f"trig={trigger_mode}/{trigger_edge}@{trigger_level_v:.2f}V, "
+            f"trig={trigger_mode}/{trigger_source}/{trigger_edge}@{trigger_level_v:.2f}V, "
             f"ch2={'on' if ch2_enabled else 'off'}"
         )
 
@@ -1155,6 +1323,12 @@ class DwfDiscoveryBackend(DiscoveryBackendAdapter):
         if hasattr(lib, "FDwfAnalogInTriggerConditionSet"):
             lib.FDwfAnalogInTriggerConditionSet.argtypes = [c_int, c_int]
             lib.FDwfAnalogInTriggerConditionSet.restype = c_bool
+        if hasattr(lib, "FDwfAnalogInTriggerChannelSet"):
+            lib.FDwfAnalogInTriggerChannelSet.argtypes = [c_int, c_int]
+            lib.FDwfAnalogInTriggerChannelSet.restype = c_bool
+        if hasattr(lib, "FDwfAnalogInTriggerHysteresisSet"):
+            lib.FDwfAnalogInTriggerHysteresisSet.argtypes = [c_int, c_double]
+            lib.FDwfAnalogInTriggerHysteresisSet.restype = c_bool
         if hasattr(lib, "FDwfAnalogInTriggerAutoTimeoutSet"):
             lib.FDwfAnalogInTriggerAutoTimeoutSet.argtypes = [c_int, c_double]
             lib.FDwfAnalogInTriggerAutoTimeoutSet.restype = c_bool

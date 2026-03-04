@@ -37,6 +37,14 @@ BUILD_DIR_WIN="$(cygpath -w "$BUILD_DIR")"
 DIST_DIR_WIN="$(cygpath -w "$DIST_DIR")"
 SPEC_DIR_WIN="$(cygpath -w "$SPEC_DIR")"
 RUN_PY_WIN="$(cygpath -w "$ROOT_DIR/run.py")"
+ICON_ARG=()
+if [[ -f "$ROOT_DIR/assets/app_icon.ico" ]]; then
+  ICON_WIN="$(cygpath -w "$ROOT_DIR/assets/app_icon.ico")"
+  ICON_ARG=(--icon "$ICON_WIN")
+elif [[ -f "$ROOT_DIR/assets/icon.ico" ]]; then
+  ICON_WIN="$(cygpath -w "$ROOT_DIR/assets/icon.ico")"
+  ICON_ARG=(--icon "$ICON_WIN")
+fi
 
 find_iscc() {
   local candidates=(
@@ -54,6 +62,7 @@ echo "[1/4] Building Windows app with PyInstaller..."
 "$PYTHON_BIN" -m PyInstaller \
   --noconfirm --clean --windowed \
   --name "$APP_NAME" \
+  "${ICON_ARG[@]}" \
   --collect-all PySide6 \
   --add-data "$ROOT_DIR_WIN\\assets;assets" \
   --add-data "$ROOT_DIR_WIN\\Examples;Examples" \

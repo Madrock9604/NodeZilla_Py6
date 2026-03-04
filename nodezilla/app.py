@@ -6,10 +6,11 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from nodezilla.main_window import MainWindow
-from nodezilla.paths import ensure_user_workspace
+from nodezilla.paths import ensure_user_workspace, user_assets_root, bundled_root
 
 
 def _startup_log_path() -> Path:
@@ -25,6 +26,29 @@ def _append_startup_log(text: str):
             f.write(text.rstrip() + "\n")
     except Exception:
         pass
+
+
+def _resolve_app_icon() -> QIcon:
+    # Prefer user-overridable icon, then bundled icon.
+    candidates = [
+        user_assets_root() / "app_icon.png",
+        user_assets_root() / "icon.png",
+        bundled_root() / "assets" / "app_icon.png",
+        bundled_root() / "assets" / "icon.png",
+        bundled_root() / "assets" / "app_icon.ico",
+        bundled_root() / "assets" / "icon.ico",
+        bundled_root() / "assets" / "app_icon.icns",
+        bundled_root() / "assets" / "icon.icns",
+    ]
+    for p in candidates:
+        try:
+            if p.exists():
+                icon = QIcon(str(p))
+                if not icon.isNull():
+                    return icon
+        except Exception:
+            continue
+    return QIcon()
 
 
 def main():
@@ -58,7 +82,15 @@ def main():
     sys.excepthook = _excepthook
 
     app = QApplication(sys.argv)
+    app.setApplicationName("NodeZilla")
+    app.setApplicationDisplayName("NodeZilla (Beta) V1.0.4")
+    app.setOrganizationName("NodeZilla")
     ensure_user_workspace()
+    icon = _resolve_app_icon()
+    if not icon.isNull():
+        app.setWindowIcon(icon)
     w = MainWindow()
+    if not icon.isNull():
+        w.setWindowIcon(icon)
     w.show()
     return app.exec()

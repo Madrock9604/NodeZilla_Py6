@@ -81,6 +81,12 @@ def ensure_user_workspace():
     _copy_missing_tree(b / "assets" / "components" / "library", user_library_root())
     _copy_missing_tree(b / "assets" / "symbols", user_symbols_root())
     _copy_missing_tree(b / "assets" / "chips", user_chips_root())
+    # Optional app icon used for title-bar/dock/taskbar.
+    for icon_name in ("app_icon.png", "app_icon.ico", "app_icon.icns", "icon.png", "icon.ico", "icon.icns"):
+        src_icon = b / "assets" / icon_name
+        dst_icon = user_assets_root() / icon_name
+        if src_icon.exists() and not dst_icon.exists():
+            shutil.copy2(src_icon, dst_icon)
 
     pl = user_pl_path()
     if not pl.exists():
@@ -89,4 +95,3 @@ def ensure_user_workspace():
             shutil.copy2(bundled_pl, pl)
         else:
             pl.write_text("")
-

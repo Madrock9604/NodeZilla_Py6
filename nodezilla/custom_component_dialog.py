@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 
 from .component_library import load_component_library, find_component_file
 from .graphics_items import COMP_WIDTH, COMP_HEIGHT
-from .paths import user_assets_root
+from .paths import user_assets_root, user_library_root
 from .theme import ThemeWatcher
 
 
@@ -806,109 +806,129 @@ class CustomComponentDialog(QDialog):
 
     def _save_component(self):
         """Save symbol JSON + component JSON into the library tree."""
-        kind = self.kind_edit.text().strip()
-        display = self.display_edit.text().strip() or kind
-        prefix = self.prefix_edit.text().strip() or (kind[:1].upper() if kind else "X")
-        category = self.category_edit.text().strip() or "Custom"
-        shortcut = self.shortcut_edit.text().strip()
-        spice_type = self.spice_type_edit.text().strip().upper()
-        comp_type = "net" if self.type_combo.currentText().lower().startswith("net") else "component"
-        net_name = self.net_name_edit.text().strip()
-        st = spice_type.upper()
-        is_part_number_component = comp_type == "component" and st not in {"R", "C", "L"}
-        value_label = "Part Number" if is_part_number_component else "Value"
-        default_value = ""
-        if comp_type == "component":
-            if st == "R":
-                default_value = "1k"
-            elif st == "C":
-                default_value = "1uF"
-            elif st == "L":
-                default_value = "1mH"
-            elif is_part_number_component:
-                default_value = display
+        try:
+            kind = self.kind_edit.text().strip()
+            display = self.display_edit.text().strip() or kind
+            prefix = self.prefix_edit.text().strip() or (kind[:1].upper() if kind else "X")
+            category = self.category_edit.text().strip() or "Custom"
+            shortcut = self.shortcut_edit.text().strip()
+            spice_type = self.spice_type_edit.text().strip().upper()
+            comp_type = "net" if self.type_combo.currentText().lower().startswith("net") else "component"
+            net_name = self.net_name_edit.text().strip()
+            st = spice_type.upper()
+            is_part_number_component = comp_type == "component" and st not in {"R", "C", "L"}
+            value_label = "Part Number" if is_part_number_component else "Value"
+            default_value = ""
+            if comp_type == "component":
+                if st == "R":
+                    default_value = "1k"
+                elif st == "C":
+                    default_value = "1uF"
+                elif st == "L":
+                    default_value = "1mH"
+                elif is_part_number_component:
+                    default_value = display
 
-        if not kind:
-            QMessageBox.warning(self, "Missing Kind", "Please enter a component kind.")
-            return
-
-        if not self._pin_items:
-            QMessageBox.warning(self, "Missing Pins", "Please place at least one pin.")
-            return
-
-        if shortcut:
-            lib = load_component_library(force_reload=True)
-            editing_kind = self.kind_edit.text().strip()
-            for comp in lib.sorted_components():
-                if not getattr(comp, "shortcut", ""):
-                    continue
-                if str(comp.shortcut).strip().lower() != shortcut.lower():
-                    continue
-                if editing_kind and comp.kind == editing_kind:
-                    continue
-                QMessageBox.warning(
-                    self,
-                    "Shortcut In Use",
-                    f'Shortcut "{shortcut}" is already assigned to "{comp.display_name}". '
-                    "Please choose a different shortcut.",
-                )
+            if not kind:
+                QMessageBox.warning(self, "Missing Kind", "Please enter a component kind.")
                 return
 
-        sym_dir = user_assets_root() / "symbols" / "custom"
-        sym_dir.mkdir(parents=True, exist_ok=True)
-        safe_display = "".join(c for c in display if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_") or kind
-        sym_path = sym_dir / f"{safe_display}.json"
-        xform = self._export_symbol_json(sym_path)
-        scale = float((xform or {}).get("scale", 1.0))
-        tx = float((xform or {}).get("tx", 0.0))
-        ty = float((xform or {}).get("ty", 0.0))
+            if not self._pin_items:
+                QMessageBox.warning(self, "Missing Pins", "Please place at least one pin.")
+                return
 
-        def _norm_xy(x: float, y: float) -> tuple[float, float]:
-            return (x * scale + tx, y * scale + ty)
+            if shortcut:
+                lib = load_component_library(force_reload=True)
+                editing_kind = self.kind_edit.text().strip()
+                for comp in lib.sorted_components():
+                    if not getattr(comp, "shortcut", ""):
+                        continue
+                    if str(comp.shortcut).strip().lower() != shortcut.lower():
+                        continue
+                    if editing_kind and comp.kind == editing_kind:
+                        continue
+                    QMessageBox.warning(
+                        self,
+                        "Shortcut In Use",
+                        f'Shortcut "{shortcut}" is already assigned to "{comp.display_name}". '
+                        "Please choose a different shortcut.",
+                    )
+                    return
 
-        root = user_assets_root() / "components" / "library"
-        # Allow nested categories using "A/B" or "A / B"
-        raw_parts = [p.strip() for p in category.replace(" / ", "/").split("/") if p.strip()]
-        if not raw_parts:
-            raw_parts = ["Custom"]
-        safe_parts = [
-            "".join(c for c in part if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_") or "Custom"
-            for part in raw_parts
-        ]
-        target_dir = root
-        for part in safe_parts:
-            target_dir = target_dir / part
-        target_dir.mkdir(parents=True, exist_ok=True)
-        comp_path = self._editing_path if self._editing_path and self._editing_path.exists() else (target_dir / f"{safe_display}.json")
+            sym_dir = user_assets_root() / "symbols" / "custom"
+            sym_dir.mkdir(parents=True, exist_ok=True)
+            safe_display = "".join(c for c in display if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_") or kind
+            sym_path = sym_dir / f"{safe_display}.json"
+            xform = self._export_symbol_json(sym_path)
+            scale = float((xform or {}).get("scale", 1.0))
+            tx = float((xform or {}).get("tx", 0.0))
+            ty = float((xform or {}).get("ty", 0.0))
 
-        data = {
-            "kind": kind,
-            "display_name": display,
-            "category": category,
-            "prefix": prefix,
-            "shortcut": shortcut,
-            "spice_type": spice_type,
-            "value_label": value_label,
-            "show_value": True,
-            "default_value": default_value,
-            "type": comp_type,
-            "net_name": net_name,
-            "symbol": f"custom/{safe_display}.json",
-            "auto_align_terminals": False,
-            "auto_scale_symbol": False,
-            "ports": [
-                {
-                    "name": p.name,
-                    "x": _norm_xy(p.scenePos().x(), p.scenePos().y())[0],
-                    "y": _norm_xy(p.scenePos().x(), p.scenePos().y())[1],
-                }
-                for p in self._pin_items
-            ],
-        }
-        comp_path.write_text(json.dumps(data, indent=2))
+            def _norm_xy(x: float, y: float) -> tuple[float, float]:
+                return (x * scale + tx, y * scale + ty)
 
-        load_component_library(force_reload=True)
-        self.accept()
+            root = user_library_root()
+            # Allow nested categories using "A/B" or "A / B"
+            raw_parts = [p.strip() for p in category.replace(" / ", "/").split("/") if p.strip()]
+            if not raw_parts:
+                raw_parts = ["Custom"]
+            safe_parts = [
+                "".join(c for c in part if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_") or "Custom"
+                for part in raw_parts
+            ]
+            target_dir = root
+            for part in safe_parts:
+                target_dir = target_dir / part
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+            def _is_under(path: Path, base: Path) -> bool:
+                try:
+                    path.resolve().relative_to(base.resolve())
+                    return True
+                except Exception:
+                    return False
+
+            # Never overwrite non-user/bundled read-only files.
+            comp_path = target_dir / f"{safe_display}.json"
+            if self._editing_path and self._editing_path.exists() and _is_under(self._editing_path, root):
+                comp_path = self._editing_path
+
+            data = {
+                "kind": kind,
+                "display_name": display,
+                "category": category,
+                "prefix": prefix,
+                "shortcut": shortcut,
+                "spice_type": spice_type,
+                "value_label": value_label,
+                "show_value": True,
+                "default_value": default_value,
+                "type": comp_type,
+                "net_name": net_name,
+                "symbol": f"custom/{safe_display}.json",
+                "auto_align_terminals": False,
+                "auto_scale_symbol": False,
+                "ports": [
+                    {
+                        "name": p.name,
+                        "x": _norm_xy(p.scenePos().x(), p.scenePos().y())[0],
+                        "y": _norm_xy(p.scenePos().x(), p.scenePos().y())[1],
+                    }
+                    for p in self._pin_items
+                ],
+            }
+            comp_path.write_text(json.dumps(data, indent=2))
+
+            load_component_library(force_reload=True)
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Save Component Error",
+                "Failed to save custom component.\n"
+                f"Details: {e}\n\n"
+                f"Try saving under:\n{user_library_root()}",
+            )
 
     def load_from_library(self, kind: str) -> bool:
         comp_path = find_component_file(kind)

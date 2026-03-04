@@ -7,12 +7,12 @@ from pathlib import Path
 import os
 import tempfile
 import time
-from PySide6.QtCore import Qt, QEvent, QTimer, QPointF
+from PySide6.QtCore import Qt, QEvent, QTimer, QPointF, QSize
 from PySide6.QtGui import QAction, QKeySequence, QUndoStack, QIcon, QColor
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QToolBar, QLabel, QSpinBox,
     QDockWidget, QStatusBar, QFileDialog, QMessageBox, QDialog, QInputDialog, QTextEdit,
-    QComboBox, QPushButton, QToolButton
+    QComboBox, QPushButton, QToolButton, QScrollArea
 )
 import json
 from .schematic_scene import SchematicScene
@@ -216,8 +216,10 @@ class MainWindow(QMainWindow):
     """Application shell wiring scene, docks, menus, and file operations."""
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("NodeZilla – Schematic & Instruments (Modular)")
+        self.setWindowTitle("NodeZilla (Beta) V1.0.4")
         self.resize(1400, 850)
+        self._did_initial_screen_fit = False
+        self._screen_fit_hooked = False
         # Runtime netlist outputs for external automation/gizmo flows.
         self.runtime_spice_netlist_text: str = ""
         self.runtime_spice_netlist_path: str = ""
@@ -251,6 +253,9 @@ class MainWindow(QMainWindow):
         inst_center = QWidget()
         inst_center.setObjectName("InstrumentsCenterHost")
         inst_center.setStyleSheet("#InstrumentsCenterHost { background: transparent; }")
+        # Collapse center host so docked tools use the full available canvas.
+        inst_center.setMinimumSize(0, 0)
+        inst_center.setMaximumSize(0, 0)
         self.instruments_tab.setCentralWidget(inst_center)
         self.tabs.addTab(self.schematic_tab, "Schematic")
         self.tabs.addTab(self.instruments_tab, "Instruments")
@@ -355,6 +360,7 @@ class MainWindow(QMainWindow):
         self.schematic_tab.scene.nets_changed.connect(self._refresh_pl_used_flags)
         self._refresh_live_spice_panel()
         self._refresh_pl_used_flags()
+        self._fit_window_to_screen()
 
         edit_menu = self.menuBar().addMenu("Edit")
         undo_act = self.undo_stack.createUndoAction(self, "Undo")
@@ -384,6 +390,13 @@ class MainWindow(QMainWindow):
             self.schematic_tab.scene.apply_theme(theme)
             if hasattr(self, "_schematic_island") and self._schematic_island is not None:
                 self._schematic_island.apply_theme(theme)
+            for panel_attr in ("scope_panel", "wavegen_panel", "supplies_panel"):
+                panel = getattr(self, panel_attr, None)
+                if panel is not None and hasattr(panel, "apply_theme"):
+                    try:
+                        panel.apply_theme(theme)
+                    except Exception:
+                        pass
             for dlg in list(getattr(self, "_chip_editors", [])):
                 try:
                     if dlg is not None and dlg.isVisible():
@@ -481,6 +494,8 @@ class MainWindow(QMainWindow):
         self.live_netlist_dock.hide()
         self.pl_dock.hide()
         self._apply_default_instrument_layout()
+        QTimer.singleShot(0, self._fit_window_to_screen)
+        QTimer.singleShot(120, self._fit_window_to_screen)
 
     # selection → props
     def _on_selection_changed(self):
@@ -884,17 +899,7 @@ class MainWindow(QMainWindow):
             if hasattr(p, "on_connection_changed"):
                 p.on_connection_changed()
         if _connected:
-            backend = self.backend
-            ok, _msg, st = backend.read_supplies_status()
-            tracking = bool(st.get("tracking", False)) if ok else False
-            power_limit_w = float(st.get("power_limit_w", 2.5)) if ok else 2.5
-            backend.configure_supplies(
-                master_enabled=True,
-                v_pos_v=5.0,
-                v_neg_v=-5.0,
-                tracking=tracking,
-                power_limit_w=power_limit_w,
-            )
+            # Do not auto-enable supplies on connect; user controls master power.
             self._sync_supplies_docks()
         self._refresh_hardware_devices()
 
@@ -946,7 +951,11 @@ class MainWindow(QMainWindow):
 
         self.scope_dock = QDockWidget("Scope", self)
         self.scope_dock.setObjectName("ScopeDock")
-        self.scope_dock.setWidget(self.scope_panel)
+        scope_scroll = QScrollArea()
+        scope_scroll.setWidgetResizable(True)
+        scope_scroll.setFrameShape(QScrollArea.NoFrame)
+        scope_scroll.setWidget(self.scope_panel)
+        self.scope_dock.setWidget(scope_scroll)
         self.scope_dock.setAllowedAreas(
             Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea | Qt.TopDockWidgetArea
         )
@@ -954,11 +963,15 @@ class MainWindow(QMainWindow):
             QDockWidget.DockWidgetMovable
             | QDockWidget.DockWidgetFloatable
         )
-        self.scope_dock.setMinimumSize(280, 180)
+        self.scope_dock.setMinimumSize(0, 0)
 
         self.wavegen_dock = QDockWidget("Wavegen", self)
         self.wavegen_dock.setObjectName("WavegenDock")
-        self.wavegen_dock.setWidget(self.wavegen_panel)
+        wavegen_scroll = QScrollArea()
+        wavegen_scroll.setWidgetResizable(True)
+        wavegen_scroll.setFrameShape(QScrollArea.NoFrame)
+        wavegen_scroll.setWidget(self.wavegen_panel)
+        self.wavegen_dock.setWidget(wavegen_scroll)
         self.wavegen_dock.setAllowedAreas(
             Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea | Qt.TopDockWidgetArea
         )
@@ -966,11 +979,15 @@ class MainWindow(QMainWindow):
             QDockWidget.DockWidgetMovable
             | QDockWidget.DockWidgetFloatable
         )
-        self.wavegen_dock.setMinimumSize(260, 160)
+        self.wavegen_dock.setMinimumSize(0, 0)
 
         self.supplies_dock = QDockWidget("Supplies", self)
         self.supplies_dock.setObjectName("SuppliesDock")
-        self.supplies_dock.setWidget(self.supplies_panel)
+        supplies_scroll = QScrollArea()
+        supplies_scroll.setWidgetResizable(True)
+        supplies_scroll.setFrameShape(QScrollArea.NoFrame)
+        supplies_scroll.setWidget(self.supplies_panel)
+        self.supplies_dock.setWidget(supplies_scroll)
         self.supplies_dock.setAllowedAreas(
             Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea | Qt.TopDockWidgetArea
         )
@@ -978,8 +995,65 @@ class MainWindow(QMainWindow):
             QDockWidget.DockWidgetMovable
             | QDockWidget.DockWidgetFloatable
         )
-        self.supplies_dock.setMinimumSize(260, 160)
+        self.supplies_dock.setMinimumSize(0, 0)
         self._apply_default_instrument_layout()
+        try:
+            self._apply_theme(self._watcher.current_theme())
+        except Exception:
+            pass
+
+    def _available_screen_rect(self):
+        screen = self.windowHandle().screen() if self.windowHandle() is not None else None
+        if screen is None:
+            screen = QApplication.primaryScreen()
+        return screen.availableGeometry() if screen is not None else self.geometry()
+
+    def _fit_window_to_screen(self):
+        """Clamp window size/position to current display so UI never opens off-screen."""
+        # In maximized/fullscreen we should not cap the window size.
+        if self.isMaximized() or self.isFullScreen():
+            self.setMaximumSize(QSize(16777215, 16777215))
+            return
+        avail = self._available_screen_rect()
+        if not avail.isValid():
+            return
+        max_w = min(int(avail.width()), int(avail.width() * 0.97))
+        max_h = min(int(avail.height()), int(avail.height() * 0.96))
+        max_w = max(480, max_w)
+        max_h = max(380, max_h)
+        # Hard cap against size-hint growth from dock contents.
+        self.setMaximumSize(max_w, max_h)
+        target_w = min(self.width(), max_w)
+        target_h = min(self.height(), max_h)
+        self.resize(target_w, target_h)
+        # Keep top-left within visible area.
+        x = min(max(self.x(), avail.left()), max(avail.left(), avail.right() - self.width() + 1))
+        y = min(max(self.y(), avail.top()), max(avail.top(), avail.bottom() - self.height() + 1))
+        self.move(x, y)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.WindowStateChange:
+            if self.isMaximized() or self.isFullScreen():
+                self.setMaximumSize(QSize(16777215, 16777215))
+            else:
+                QTimer.singleShot(0, self._fit_window_to_screen)
+
+    def _ensure_screen_fit_hooks(self):
+        if self._screen_fit_hooked:
+            return
+        wh = self.windowHandle()
+        if wh is None:
+            return
+        wh.screenChanged.connect(lambda _screen: QTimer.singleShot(0, self._fit_window_to_screen))
+        self._screen_fit_hooked = True
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._ensure_screen_fit_hooks()
+        if not self._did_initial_screen_fit:
+            self._fit_window_to_screen()
+            self._did_initial_screen_fit = True
 
     def _apply_default_instrument_layout(self):
         """Force default instruments layout:
@@ -1694,6 +1768,27 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Device required", "Connect a device first.")
             return
 
+        # Safety interlock: if Wavegen is running, pause it during runtime build
+        # to avoid driving an intermediate/shorted physical state.
+        wavegen_was_running = bool(getattr(getattr(self, "wavegen_panel", None), "_running", False))
+        wavegen_cfg = None
+        try:
+            if getattr(self, "wavegen_panel", None) is not None and hasattr(self.wavegen_panel, "_params"):
+                wavegen_cfg = dict(self.wavegen_panel._params())
+        except Exception:
+            wavegen_cfg = None
+        if wavegen_was_running:
+            try:
+                backend.stop_tool("wavegen")
+            except Exception:
+                pass
+            try:
+                if getattr(self, "wavegen_panel", None) is not None and hasattr(self.wavegen_panel, "_set_running"):
+                    self.wavegen_panel._set_running(False)
+                    self.wavegen_panel.state_label.setText("State: Paused for runtime build")
+            except Exception:
+                pass
+
         # Preserve current supplies state so runtime build cannot silently
         # change rails configuration (especially when master is OFF).
         pre_supplies_ok = False
@@ -1774,6 +1869,21 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             self._sync_supplies_docks()
+            # Resume Wavegen if it was active before runtime build.
+            if wavegen_was_running:
+                try:
+                    if isinstance(wavegen_cfg, dict):
+                        backend.configure_wavegen(**wavegen_cfg)
+                    backend.start_tool("wavegen")
+                    if getattr(self, "wavegen_panel", None) is not None and hasattr(self.wavegen_panel, "_set_running"):
+                        self.wavegen_panel._set_running(True)
+                        self.wavegen_panel.state_label.setText("State: Running")
+                except Exception:
+                    try:
+                        if getattr(self, "wavegen_panel", None) is not None:
+                            self.wavegen_panel.state_label.setText("State: Error resuming wavegen")
+                    except Exception:
+                        pass
         self.statusBar().showMessage(
             f"Runtime SPICE netlist ready: {self.runtime_spice_netlist_path}",
             5000,

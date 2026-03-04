@@ -1,0 +1,284 @@
+{
+  "components": [
+    {
+      "kind": "Ground",
+      "pos": [
+        -1280.0,
+        -40.0
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "GND",
+      "value": "GND",
+      "labels": {
+        "refdes_pos": [
+          -18.15625,
+          -43.625
+        ],
+        "value_pos": [
+          56.0,
+          -12.0
+        ],
+        "refdes_manual": false,
+        "value_manual": false
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "Ground",
+      "pos": [
+        -1280.0,
+        -240.0
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "GND",
+      "value": "GND",
+      "labels": {
+        "refdes_pos": [
+          -18.15625,
+          -43.625
+        ],
+        "value_pos": [
+          56.0,
+          -12.0
+        ],
+        "refdes_manual": false,
+        "value_manual": false
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "Oscope",
+      "pos": [
+        -1200.0,
+        -100.0
+      ],
+      "rotation": 90.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "O2",
+      "value": "Oscope",
+      "labels": {
+        "refdes_pos": [
+          -12.78125,
+          -64.00109865963525
+        ],
+        "value_pos": [
+          7.9453125,
+          -52.393310993920736
+        ],
+        "refdes_manual": false,
+        "value_manual": true
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "Oscope",
+      "pos": [
+        -1200.0,
+        -300.0
+      ],
+      "rotation": 90.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "O1",
+      "value": "Oscope",
+      "labels": {
+        "refdes_pos": [
+          -11.875,
+          -64.00109865963525
+        ],
+        "value_pos": [
+          3.9453125,
+          -46.393310993920736
+        ],
+        "refdes_manual": false,
+        "value_manual": true
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "WaveGen",
+      "pos": [
+        -1500.0,
+        -100.0
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "W2",
+      "value": "WaveGen",
+      "labels": {
+        "refdes_pos": [
+          -14.0546875,
+          -55.01406799531067
+        ],
+        "value_pos": [
+          -32.34375,
+          41.01406799531067
+        ],
+        "refdes_manual": false,
+        "value_manual": false
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "WaveGen",
+      "pos": [
+        -1500.0,
+        -300.0
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "W1",
+      "value": "WaveGen",
+      "labels": {
+        "refdes_pos": [
+          -13.1484375,
+          -55.01406799531067
+        ],
+        "value_pos": [
+          -32.34375,
+          41.01406799531067
+        ],
+        "refdes_manual": false,
+        "value_manual": false
+      },
+      "chip": {},
+      "chip_io": {}
+    }
+  ],
+  "texts": [],
+  "wires": [
+    {
+      "points": [
+        {
+          "x": -1240.0,
+          "y": -280.0
+        },
+        {
+          "x": -1280.0,
+          "y": -280.0
+        },
+        {
+          "x": -1280.0,
+          "y": -260.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        3,
+        "-"
+      ],
+      "b": [
+        1,
+        "A"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -1240.0,
+          "y": -80.0
+        },
+        {
+          "x": -1280.0,
+          "y": -80.0
+        },
+        {
+          "x": -1280.0,
+          "y": -60.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        2,
+        "-"
+      ],
+      "b": [
+        0,
+        "A"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -1240.0,
+          "y": -120.0
+        },
+        {
+          "x": -1460.0,
+          "y": -120.0
+        },
+        {
+          "x": -1460.0,
+          "y": -100.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        2,
+        "+"
+      ],
+      "b": [
+        4,
+        "+"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -1240.0,
+          "y": -320.0
+        },
+        {
+          "x": -1460.0,
+          "y": -320.0
+        },
+        {
+          "x": -1460.0,
+          "y": -300.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        3,
+        "+"
+      ],
+      "b": [
+        5,
+        "+"
+      ]
+    }
+  ],
+  "settings": {
+    "grid_on": true,
+    "grid_size": 20,
+    "grid_style": "dots",
+    "snap_on": true,
+    "wire_junctions": [],
+    "net_names": []
+  },
+  "_format": 2
+}

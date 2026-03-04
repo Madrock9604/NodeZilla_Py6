@@ -31,6 +31,16 @@ INSTALLER_SCRIPTS="$RELEASE_ROOT/pkg_scripts"
 mkdir -p "$BUILD_DIR" "$DIST_DIR" "$SPEC_DIR" "$PKG_DIR"
 
 DWF_ADD_BINARY_ARGS=()
+ICON_ARGS=()
+if [[ -f "$ROOT_DIR/assets/app_icon.icns" ]]; then
+  ICON_ARGS=(--icon "$ROOT_DIR/assets/app_icon.icns")
+elif [[ -f "$ROOT_DIR/assets/icon.icns" ]]; then
+  ICON_ARGS=(--icon "$ROOT_DIR/assets/icon.icns")
+elif [[ -f "$ROOT_DIR/assets/app_icon.png" ]]; then
+  ICON_ARGS=(--icon "$ROOT_DIR/assets/app_icon.png")
+elif [[ -f "$ROOT_DIR/assets/icon.png" ]]; then
+  ICON_ARGS=(--icon "$ROOT_DIR/assets/icon.png")
+fi
 if [[ "$DWF_BUNDLE_MODE" != "off" ]]; then
   DWF_CANDIDATE=""
   if [[ "$DWF_BUNDLE_MODE" != "auto" ]]; then
@@ -64,6 +74,7 @@ echo "[1/4] Building macOS app..."
 "$PYTHON_BIN" -m PyInstaller \
   --noconfirm --clean --windowed \
   --name "$APP_NAME" \
+  "${ICON_ARGS[@]}" \
   --collect-all PySide6 \
   "${DWF_ADD_BINARY_ARGS[@]}" \
   --add-data "$ROOT_DIR/assets:assets" \
