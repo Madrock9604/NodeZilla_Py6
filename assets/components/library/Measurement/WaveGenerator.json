@@ -1,26 +1,23 @@
 {
-  "kind": "Oscope",
-  "display_name": "Oscope",
+  "kind": "WaveGenerator",
+  "display_name": "WaveGenerator",
   "category": "Measurement",
-  "prefix": "O",
+  "prefix": "W",
   "shortcut": "",
   "spice_type": "X",
   "value_label": "Part Number",
+  "show_value": true,
+  "default_value": "WaveGenerator",
   "type": "component",
   "net_name": "",
-  "symbol": "custom/Oscope.json",
+  "symbol": "custom/WaveGenerator.json",
   "auto_align_terminals": false,
   "auto_scale_symbol": false,
   "ports": [
     {
       "name": "+",
-      "x": -19.992675602431703,
-      "y": 49.98168900607926
-    },
-    {
-      "name": "-",
-      "x": 19.992675602431703,
-      "y": 49.98168900607926
+      "x": 18.11320754716981,
+      "y": 45.28301886792453
     }
   ]
 }

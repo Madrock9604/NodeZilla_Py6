@@ -1,0 +1,231 @@
+{
+  "name": "Component Card 1 (No instrumentation)",
+  "description": "This is the general purpose component card excluding the instrumentation.",
+  "components": [
+    {
+      "refdes": "xU1",
+      "ports": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "value": "",
+      "part": "LM358"
+    },
+    {
+      "refdes": "dD1",
+      "ports": [
+        8,
+        9
+      ],
+      "value": "",
+      "part": "1N4002"
+    },
+    {
+      "refdes": "dD2",
+      "ports": [
+        10,
+        11
+      ],
+      "value": "",
+      "part": "1N4002"
+    },
+    {
+      "refdes": "dD3",
+      "ports": [
+        12,
+        13
+      ],
+      "value": "",
+      "part": "1N4002"
+    },
+    {
+      "refdes": "dD4",
+      "ports": [
+        14,
+        15
+      ],
+      "value": "",
+      "part": "1N4002"
+    },
+    {
+      "refdes": "qQ1",
+      "ports": [
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29
+      ],
+      "value": "",
+      "part": "CD4007"
+    },
+    {
+      "refdes": "rR1",
+      "ports": [
+        30,
+        31
+      ],
+      "value": "2200",
+      "part": ""
+    },
+    {
+      "refdes": "rR2",
+      "ports": [
+        32,
+        33
+      ],
+      "value": "3900",
+      "part": ""
+    },
+    {
+      "refdes": "rR3",
+      "ports": [
+        34,
+        35
+      ],
+      "value": "4700",
+      "part": ""
+    },
+    {
+      "refdes": "rR4",
+      "ports": [
+        36,
+        37
+      ],
+      "value": "5600",
+      "part": ""
+    },
+    {
+      "refdes": "rR5",
+      "ports": [
+        38,
+        39
+      ],
+      "value": "6800",
+      "part": ""
+    },
+    {
+      "refdes": "rR6",
+      "ports": [
+        40,
+        41
+      ],
+      "value": "8200",
+      "part": ""
+    },
+    {
+      "refdes": "rR7",
+      "ports": [
+        42,
+        43
+      ],
+      "value": "10000",
+      "part": ""
+    },
+    {
+      "refdes": "rR8",
+      "ports": [
+        44,
+        45
+      ],
+      "value": "12000",
+      "part": ""
+    },
+    {
+      "refdes": "rR9",
+      "ports": [
+        46,
+        47
+      ],
+      "value": "15000",
+      "part": ""
+    },
+    {
+      "refdes": "lL1",
+      "ports": [
+        48,
+        49
+      ],
+      "value": "47e-03",
+      "part": ""
+    },
+    {
+      "refdes": "lL2",
+      "ports": [
+        50,
+        51
+      ],
+      "value": "56e-03",
+      "part": ""
+    },
+    {
+      "refdes": "lL3",
+      "ports": [
+        52,
+        53
+      ],
+      "value": "68e-03",
+      "part": ""
+    },
+    {
+      "refdes": "lL4",
+      "ports": [
+        54,
+        55
+      ],
+      "value": "82e-03",
+      "part": ""
+    },
+    {
+      "refdes": "cC1",
+      "ports": [
+        56,
+        57
+      ],
+      "value": "10e-09",
+      "part": ""
+    },
+    {
+      "refdes": "cC2",
+      "ports": [
+        58,
+        59
+      ],
+      "value": "15e-09",
+      "part": ""
+    },
+    {
+      "refdes": "cC3",
+      "ports": [
+        60,
+        61
+      ],
+      "value": "22e-09",
+      "part": ""
+    },
+    {
+      "refdes": "cC4",
+      "ports": [
+        62,
+        63
+      ],
+      "value": "33e-09",
+      "part": ""
+    }
+  ]
+}

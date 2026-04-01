@@ -13,6 +13,7 @@ class PortDef:
     name: str
     x: float
     y: float
+    pin_number: int | None = None
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,8 @@ class ComponentDef:
     display_name: str
     prefix: str
     ports: List[PortDef]
+    multipart_family: str = ""
+    unit_name: str = ""
     symbol: str = ""
     category: str = "General"
     shortcut: str = ""
@@ -76,7 +79,12 @@ def _parse_component(
     ports = []
     for p in entry.get("ports", []):
         name = str(p.get("name", "")).strip() or "P"
-        ports.append(PortDef(name=name, x=float(p.get("x", 0.0)), y=float(p.get("y", 0.0))))
+        raw_pin_number = p.get("pin_number", None)
+        try:
+            pin_number = int(raw_pin_number) if raw_pin_number not in (None, "") else None
+        except Exception:
+            pin_number = None
+        ports.append(PortDef(name=name, x=float(p.get("x", 0.0)), y=float(p.get("y", 0.0)), pin_number=pin_number))
     if not ports:
         ports = [PortDef("A", -50.0, 0.0), PortDef("B", 50.0, 0.0)]
     kind = str(entry.get("kind", "")).strip()
@@ -98,6 +106,8 @@ def _parse_component(
         display_name=display_name,
         prefix=prefix,
         ports=ports,
+        multipart_family=str(entry.get("multipart_family", "")).strip(),
+        unit_name=str(entry.get("unit_name", "")).strip(),
         symbol=str(entry.get("symbol", "")).strip(),
         category=category,
         shortcut=str(entry.get("shortcut", "")).strip(),

@@ -30,8 +30,9 @@ from .instruments_tab import InstrumentTool, ScopePanel, SuppliesPanel, WavegenP
 from .discovery_backend import make_backend
 from .pl_panel import PlPanel
 from .project_explorer_panel import ProjectExplorerPanel
+from .hardware_builder_panel import HardwareBuilderPanel
 from .chip_editor_dialog import ChipEditorDialog
-from .paths import user_examples_dir, user_projects_dir, user_assets_root
+from .paths import user_examples_dir, user_projects_dir, user_assets_root, user_root
 from nodezilla import Program as P
 
 
@@ -225,7 +226,8 @@ class MainWindow(QMainWindow):
         self.runtime_spice_netlist_path: str = ""
         self._clipboard_payload: dict | None = None
         self._paste_serial: int = 0
-        self._pending_pl_component_id: int | None = None
+        self._pending_pl_component_id: str | None = None
+        self._pending_pl_source_id: int = -1
 
         self.tabs = QTabWidget()
         self.status_label = QLabel("Ready")
@@ -257,8 +259,12 @@ class MainWindow(QMainWindow):
         inst_center.setMinimumSize(0, 0)
         inst_center.setMaximumSize(0, 0)
         self.instruments_tab.setCentralWidget(inst_center)
+        self.hardware_builder_tab = QWidget()
+        self.hardware_builder_tab_layout = QVBoxLayout(self.hardware_builder_tab)
+        self.hardware_builder_tab_layout.setContentsMargins(0, 0, 0, 0)
         self.tabs.addTab(self.schematic_tab, "Schematic")
         self.tabs.addTab(self.instruments_tab, "Instruments")
+        self.tabs.addTab(self.hardware_builder_tab, "Hardware Configuration")
         self.setCentralWidget(self.tabs)
         self._build_hardware_toolbar()
 
@@ -299,6 +305,16 @@ class MainWindow(QMainWindow):
         pl_dock.setAllowedAreas(Qt.RightDockWidgetArea | Qt.LeftDockWidgetArea | Qt.BottomDockWidgetArea)
         self.addDockWidget(Qt.RightDockWidgetArea, pl_dock)
         self.pl_dock = pl_dock
+
+        self.hardware_builder_panel = HardwareBuilderPanel()
+        self.hardware_builder_panel.pl_generated.connect(self._on_pl_generated)
+        self.hardware_builder_scroll = QScrollArea()
+        self.hardware_builder_scroll.setWidgetResizable(True)
+        self.hardware_builder_scroll.setFrameShape(QScrollArea.NoFrame)
+        self.hardware_builder_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.hardware_builder_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.hardware_builder_scroll.setWidget(self.hardware_builder_panel)
+        self.hardware_builder_tab_layout.addWidget(self.hardware_builder_scroll)
 
         self.component_panel = ComponentPanel(self.component_library)
         self.component_panel.place_requested.connect(self._set_mode_place_active)
@@ -376,6 +392,14 @@ class MainWindow(QMainWindow):
         self._install_component_shortcuts()
 
 
+    def _on_pl_generated(self, pl_path: str):
+        self.status_label.setText(f"PL generated: {pl_path}")
+        try:
+            self.pl_panel.refresh()
+            self._refresh_pl_used_flags()
+        except Exception:
+            pass
+
     def _apply_theme(self, theme):
         """Apply theme to scene items (deferred safely until UI exists)."""
         if getattr(self, "_theme_apply_in_progress", False):
@@ -444,7 +468,9 @@ class MainWindow(QMainWindow):
 
         Preserve user visibility choices when returning from Instruments.
         """
-        on_schematic = self.tabs.widget(index) is self.schematic_tab
+        current = self.tabs.widget(index)
+        on_schematic = current is self.schematic_tab
+        on_instruments = current is self.instruments_tab
         if hasattr(self, "_schematic_toolbar") and self._schematic_toolbar is not None:
             self._schematic_toolbar.setVisible(False)
         if hasattr(self, "_schematic_island") and self._schematic_island is not None:
@@ -478,6 +504,7 @@ class MainWindow(QMainWindow):
             self.scope_dock.hide()
             self.wavegen_dock.hide()
             self.supplies_dock.hide()
+            QTimer.singleShot(0, self._fit_window_to_screen)
             return
 
         # Snapshot current schematic dock visibility, then hide all of them.
@@ -493,7 +520,11 @@ class MainWindow(QMainWindow):
         self.project_explorer_dock.hide()
         self.live_netlist_dock.hide()
         self.pl_dock.hide()
-        self._apply_default_instrument_layout()
+        self.scope_dock.hide()
+        self.wavegen_dock.hide()
+        self.supplies_dock.hide()
+        if on_instruments:
+            self._apply_default_instrument_layout()
         QTimer.singleShot(0, self._fit_window_to_screen)
         QTimer.singleShot(120, self._fit_window_to_screen)
 
@@ -549,8 +580,10 @@ class MainWindow(QMainWindow):
         pl_type = str(payload.get("type", "")).strip()
         pl_name = str(payload.get("name", "")).strip()
         value_or_part = str(payload.get("value_or_part", "")).strip()
-        comp_id = int(payload.get("id", -1))
-        kind = self._resolve_library_kind_for_pl(pl_type, pl_name, value_or_part)
+        comp_id = str(payload.get("id", "-1"))
+        kind = str(payload.get("kind", "") or "").strip()
+        if not kind:
+            kind = self._resolve_library_kind_for_pl(pl_type, pl_name, value_or_part)
         if not kind:
             QMessageBox.warning(
                 self,
@@ -561,18 +594,23 @@ class MainWindow(QMainWindow):
                 ),
             )
             return
+        refdes_override = str(payload.get("base_refdes", "") or pl_name).strip()
         self.tabs.setCurrentWidget(self.schematic_tab)
         self.schematic_tab.scene.set_mode_place(kind)
-        self.schematic_tab.scene.set_place_overrides(refdes=pl_name, value=value_or_part)
+        self.schematic_tab.scene.set_place_overrides(refdes=refdes_override, value=value_or_part)
         self._pending_pl_component_id = comp_id
+        self._pending_pl_source_id = int(payload.get("source_id", -1))
         self.statusBar().showMessage(
             f"PL row {comp_id} selected: place {kind} as {pl_name}",
             4000,
         )
 
     def _on_component_placed(self, _comp: ComponentItem):
+        if self._pending_pl_source_id >= 0:
+            setattr(_comp, "_pl_source_id", int(self._pending_pl_source_id))
         self._refresh_pl_used_flags()
         self._pending_pl_component_id = None
+        self._pending_pl_source_id = -1
 
     def _open_chip_editor_for_component(self, comp: ComponentItem):
         dlg = ChipEditorDialog(comp, self)
@@ -739,14 +777,25 @@ class MainWindow(QMainWindow):
         netlist = NetlistBuilder().build(self.schematic_tab.scene)
         placed_counts = {}
         placed_refs = {}
+        placed_multipart_groups = {}
         for c in netlist.components:
+            family = str(getattr(c, "multipart_family", "") or "").strip()
+            package_ref = str(getattr(c, "package_refdes", "") or getattr(c, "refdes", "") or "").strip()
+            if family and package_ref:
+                placed_multipart_groups.setdefault((package_ref, family), c)
+                continue
             sig = self.pl_panel.signature_from_kind_value(getattr(c, "kind", ""), getattr(c, "value", ""))
             placed_counts[sig] = int(placed_counts.get(sig, 0)) + 1
             placed_refs.setdefault(sig, []).append(str(getattr(c, "refdes", "")).strip() or "?")
 
+        for (_package_ref, _family), comp in placed_multipart_groups.items():
+            sig = self.pl_panel.physical_component_signature(comp)
+            placed_counts[sig] = int(placed_counts.get(sig, 0)) + 1
+            placed_refs.setdefault(sig, []).append(str(getattr(comp, "package_refdes", "") or getattr(comp, "refdes", "")).strip() or "?")
+
         shortages = []
         for sig, placed in placed_counts.items():
-            requested = int(self.pl_panel.requested_count_for_signature(sig))
+            requested = int(self.pl_panel.requested_physical_count_for_signature(sig))
             missing = placed - requested
             if missing > 0:
                 shortages.append((sig, requested, placed, missing, placed_refs.get(sig, [])))
@@ -763,7 +812,7 @@ class MainWindow(QMainWindow):
         for sig, requested, placed, missing, refs in sorted(
             shortages, key=lambda x: (str(x[0][0]), str(x[0][1]))
         ):
-            t_name = str(sig[0] or "component")
+            t_name = "multipart" if str(sig[0]) == "multipart" else str(sig[0] or "component")
             val = sig[1][1] if isinstance(sig[1], tuple) and len(sig[1]) > 1 else sig[1]
             shown_refs = ", ".join(refs[:8]) + ("..." if len(refs) > 8 else "")
             lines.append(
@@ -1768,6 +1817,17 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Device required", "Connect a device first.")
             return
 
+        # Start from a known-safe matrix state so a previous runtime build
+        # cannot contaminate this one.
+        try:
+            if hasattr(backend, "RESET"):
+                backend.RESET(getattr(P, "programming_delay", 10))
+                time.sleep(0.02)
+            if hasattr(backend, "digitalio_write_mask"):
+                backend.digitalio_write_mask(0)
+        except Exception:
+            pass
+
         # Safety interlock: if Wavegen is running, pause it during runtime build
         # to avoid driving an intermediate/shorted physical state.
         wavegen_was_running = bool(getattr(getattr(self, "wavegen_panel", None), "_running", False))
@@ -1825,17 +1885,63 @@ class MainWindow(QMainWindow):
 
         self.runtime_spice_netlist_text = netlist_text
         self.runtime_spice_netlist_path = str(tmp_path)
+        runtime_debug_enabled = os.environ.get("NODEZILLA_RUNTIME_DEBUG", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        debug_log_path = str(root_dir / "runtime_build_debug.log")
+        debug_log_fallback_path = str(user_root() / "runtime_build_debug.log")
+
+        def _runtime_debug_log(message: str):
+            if not runtime_debug_enabled:
+                return
+            try:
+                with open(debug_log_path, "a", encoding="utf-8") as dbg:
+                    dbg.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}\n")
+            except Exception:
+                pass
+            try:
+                with open(debug_log_fallback_path, "a", encoding="utf-8") as dbg:
+                    dbg.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}\n")
+            except Exception:
+                pass
+
+        if runtime_debug_enabled:
+            try:
+                with open(debug_log_path, "w", encoding="utf-8") as dbg:
+                    dbg.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} runtime-build-start\n")
+                    dbg.write(f"netlist_path={tmp_path}\n")
+                with open(debug_log_fallback_path, "w", encoding="utf-8") as dbg:
+                    dbg.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} runtime-build-start\n")
+                    dbg.write(f"netlist_path={tmp_path}\n")
+                    dbg.write(f"temp_log_path={debug_log_path}\n")
+            except Exception:
+                pass
 
         try:
             ComponentDataSet = P.CreateComponentDataSet.MakeDataSet()
+            _runtime_debug_log(f"component-dataset-size={len(ComponentDataSet)}")
             P.ComponentSerach(ComponentDataSet, tmp_path)
             Used_Components = P.ComponentSerach.GetComponentsUsed(ComponentDataSet)
-            P.CirToScript(Used_Components, backend)
+            _runtime_debug_log(f"used-components={len(Used_Components)}")
+            P.CirToScript(
+                Used_Components,
+                backend,
+                logger=_runtime_debug_log if runtime_debug_enabled else None,
+            )
         except Exception as e:
-            QMessageBox.critical(self, "Runtime script error", f"Failed while processing runtime script: {e}")
+            extra = f"\n\nDebug log:\n{debug_log_fallback_path}" if runtime_debug_enabled else ""
+            QMessageBox.critical(
+                self,
+                "Runtime script error",
+                f"Failed while processing runtime script: {e}{extra}",
+            )
             return
         finally:
-            # Always clear runtime-driven DIO states first.
+            # Leave the programmed matrix intact after a successful build, but
+            # return GPIO control lines to an idle state.
             try:
                 if hasattr(backend, "digitalio_write_mask"):
                     backend.digitalio_write_mask(0)
@@ -1884,6 +1990,11 @@ class MainWindow(QMainWindow):
                             self.wavegen_panel.state_label.setText("State: Error resuming wavegen")
                     except Exception:
                         pass
+        if runtime_debug_enabled:
+            self.statusBar().showMessage(
+                f"Runtime build debug log: {debug_log_fallback_path}",
+                8000,
+            )
         self.statusBar().showMessage(
             f"Runtime SPICE netlist ready: {self.runtime_spice_netlist_path}",
             5000,

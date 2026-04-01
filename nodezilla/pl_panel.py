@@ -24,6 +24,21 @@ from .component_library import load_component_library
 from .paths import user_pl_path
 
 
+def _display_refdes_for_component(comp) -> str:
+    if hasattr(comp, "display_refdes"):
+        try:
+            return str(comp.display_refdes() or "").strip()
+        except Exception:
+            pass
+    base = str(getattr(comp, "refdes", "") or "").strip()
+    unit = ""
+    try:
+        unit = str(getattr(comp, "unit_name", lambda: "")() or "").strip()
+    except Exception:
+        unit = ""
+    return f"{base}{unit}" if base and unit else base
+
+
 class PlPanel(QWidget):
     """Dock panel that lists components parsed from PL.txt."""
     place_requested = Signal(dict)
@@ -130,27 +145,70 @@ class PlPanel(QWidget):
         except Exception:
             dataset = []
         self._rows_payload = []
+        lib = load_component_library(force_reload=True)
+        multipart_defs = [
+            c for c in lib.all()
+            if str(getattr(c, "multipart_family", "") or "").strip()
+            and str(getattr(c, "comp_type", "component")).lower() == "component"
+            and not bool(getattr(c, "is_chip", False))
+        ]
+        def _pin_sort_key(cdef):
+            pins = [p.pin_number for p in getattr(cdef, "ports", []) if getattr(p, "pin_number", None) is not None]
+            return (min(pins) if pins else 9999, str(getattr(cdef, "unit_name", "") or ""))
+        def _multipart_units(part_name: str):
+            target = str(part_name or "").strip().lower()
+            units = [
+                c for c in multipart_defs
+                if target and target in {
+                    str(getattr(c, "display_name", "") or "").strip().lower(),
+                    str(getattr(c, "multipart_family", "") or "").strip().lower(),
+                    str(getattr(c, "kind", "") or "").strip().lower(),
+                }
+            ]
+            return sorted(units, key=_pin_sort_key)
+
         for comp in dataset:
             value_or_part = getattr(comp, "value", "")
             if str(value_or_part) == "NA":
                 value_or_part = getattr(comp, "partnum", "")
-            payload = {
-                "id": int(getattr(comp, "ID", -1)),
+            base_payload = {
+                "id": str(getattr(comp, "ID", -1)),
+                "source_id": int(getattr(comp, "ID", -1)),
                 "type": str(getattr(comp, "type", "")),
                 "name": str(getattr(comp, "name", "")),
                 "value_or_part": str(value_or_part),
                 "used": bool(getattr(comp, "used", False)),
             }
-            self._rows_payload.append(payload)
-            rows.append(
-                (
-                    str(payload["id"]),
-                    payload["type"],
-                    payload["name"],
-                    payload["value_or_part"],
-                    "yes" if payload["used"] else "no",
-                )
-            )
+            units = _multipart_units(base_payload["value_or_part"])
+            if units:
+                for unit in units:
+                    unit_name = str(getattr(unit, "unit_name", "") or "").strip()
+                    payload = dict(base_payload)
+                    payload.update({
+                        "id": f"{base_payload['source_id']}:{unit_name}",
+                        "kind": str(getattr(unit, "kind", "") or "").strip(),
+                        "multipart_family": str(getattr(unit, "multipart_family", "") or "").strip(),
+                        "unit_name": unit_name,
+                        "base_refdes": base_payload["name"],
+                        "name": f"{base_payload['name']}{unit_name}",
+                    })
+                    self._rows_payload.append(payload)
+                    rows.append((
+                        str(payload["id"]),
+                        payload["type"],
+                        payload["name"],
+                        payload["value_or_part"],
+                        "yes" if payload["used"] else "no",
+                    ))
+                continue
+            self._rows_payload.append(base_payload)
+            rows.append((
+                str(base_payload["id"]),
+                base_payload["type"],
+                base_payload["name"],
+                base_payload["value_or_part"],
+                "yes" if base_payload["used"] else "no",
+            ))
 
         self.table.setRowCount(len(rows))
         for r, row in enumerate(rows):
@@ -274,6 +332,13 @@ class PlPanel(QWidget):
         )
 
     @classmethod
+    def _physical_row_signature(cls, row_payload: dict):
+        family = str(row_payload.get("multipart_family", "") or "").strip()
+        if family:
+            return ("multipart", family.lower())
+        return cls._row_signature(row_payload)
+
+    @classmethod
     def _component_signature(cls, comp, comp_def):
         return (
             cls._component_type_name(comp, comp_def),
@@ -291,9 +356,33 @@ class PlPanel(QWidget):
         by_sig = self._requested_row_indices_by_signature()
         return len(by_sig.get(sig, []))
 
+    def requested_physical_count_for_signature(self, sig) -> int:
+        count = 0
+        seen_sources: set[int] = set()
+        for row in self._rows_payload:
+            row_sig = self._physical_row_signature(row)
+            if row_sig != sig:
+                continue
+            family = str(row.get("multipart_family", "") or "").strip()
+            if family:
+                source_id = int(row.get("source_id", -1))
+                if source_id in seen_sources:
+                    continue
+                seen_sources.add(source_id)
+            count += 1
+        return count
+
     def component_signature(self, comp):
         lib = load_component_library()
         cdef = lib.get(str(getattr(comp, "kind", "")).strip())
+        return self._component_signature(comp, cdef)
+
+    def physical_component_signature(self, comp):
+        lib = load_component_library()
+        cdef = lib.get(str(getattr(comp, "kind", "")).strip())
+        family = str(getattr(cdef, "multipart_family", "") or "").strip() if cdef else ""
+        if family:
+            return ("multipart", family.lower())
         return self._component_signature(comp, cdef)
 
     def is_physical_component(self, comp) -> bool:
@@ -306,19 +395,37 @@ class PlPanel(QWidget):
         return str(getattr(cdef, "comp_type", "component")).lower() != "net"
 
     def sync_used_from_components(self, components: list):
-        """Recompute Used column from live schematic components.
-
-        A PL row is considered used by pool allocation of matching
-        (type, value/part) signatures. Names are not required to match.
-        """
+        """Recompute Used column from live schematic components."""
         lib = load_component_library()
         placed_counts = {}
+        placed_multipart = set()
+
+        def _multipart_base_refdes(comp, cdef) -> str:
+            base = str(
+                getattr(comp, "package_refdes", "")
+                or getattr(comp, "refdes", "")
+                or ""
+            ).strip()
+            unit = str(getattr(cdef, "unit_name", "") or "").strip()
+            if base and unit and base.lower().endswith(unit.lower()) and len(base) > len(unit):
+                base = base[:-len(unit)]
+            return base.strip().lower()
+
         for comp in components:
             cdef = lib.get(str(getattr(comp, "kind", "")).strip())
             if cdef is not None and (
                 str(getattr(cdef, "comp_type", "component")).lower() == "net"
                 or bool(getattr(cdef, "is_chip", False))
             ):
+                continue
+            if cdef is not None and str(getattr(cdef, "multipart_family", "") or "").strip():
+                source_id = int(getattr(comp, "pl_source_id", -1))
+                kind_key = str(getattr(cdef, "kind", "") or "").strip().lower()
+                if source_id >= 0:
+                    placed_multipart.add((source_id, kind_key))
+                    continue
+                base_refdes = _multipart_base_refdes(comp, cdef)
+                placed_multipart.add((base_refdes, kind_key))
                 continue
             sig = self._component_signature(comp, cdef)
             placed_counts[sig] = int(placed_counts.get(sig, 0)) + 1
@@ -332,6 +439,13 @@ class PlPanel(QWidget):
 
         for r, row_payload in enumerate(self._rows_payload):
             used = r in used_rows
+            row_kind = str(row_payload.get("kind", "") or "").strip().lower()
+            base_refdes = str(row_payload.get("base_refdes", "") or "").strip().lower()
+            source_id = int(row_payload.get("source_id", -1))
+            if row_kind and source_id >= 0:
+                used = (source_id, row_kind) in placed_multipart or ((base_refdes, row_kind) in placed_multipart if base_refdes else False)
+            elif row_kind and base_refdes:
+                used = (base_refdes, row_kind) in placed_multipart
             row_payload["used"] = bool(used)
             item = self.table.item(r, 4)
             if item is None:

@@ -1,62 +1,68 @@
 {
   "components": [
     {
-      "kind": "Oscope",
+      "kind": "Oscilloscope",
       "pos": [
-        -1400.0,
-        -140.0
-      ],
-      "rotation": 270.0,
-      "mirror": {
-        "mx": 1.0,
-        "my": -1.0
-      },
-      "refdes": "O2",
-      "value": "Oscope",
-      "labels": {
-        "refdes_pos": [
-          14.21875,
-          -34.00109865963525
-        ],
-        "value_pos": [
-          -44.0546875,
-          -32.393310993920736
-        ],
-        "refdes_manual": true,
-        "value_manual": true
-      }
-    },
-    {
-      "kind": "Oscope",
-      "pos": [
-        -880.0,
-        -200.0
+        -821.8867924528302,
+        -205.28301886792454
       ],
       "rotation": 90.0,
       "mirror": {
         "mx": 1.0,
         "my": 1.0
       },
-      "refdes": "O1",
-      "value": "Oscope",
+      "refdes": "O2",
+      "value": "Oscilloscope",
+      "pl_source_id": -1,
       "labels": {
         "refdes_pos": [
-          -11.875,
-          -64.00109865963525
+          -12.78125,
+          -64.28301886792453
         ],
         "value_pos": [
-          -68.0546875,
-          17.606689006079264
+          -64.21532018654366,
+          31.877089724194335
         ],
         "refdes_manual": false,
         "value_manual": true
-      }
+      },
+      "chip": {},
+      "chip_io": {}
     },
     {
-      "kind": "WaveGen",
+      "kind": "Oscilloscope",
       "pos": [
-        -1400.0,
-        -300.0
+        -1345.2830188679245,
+        -138.1132075471698
+      ],
+      "rotation": 270.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": -1.0
+      },
+      "refdes": "O1",
+      "value": "Oscilloscope",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -11.875,
+          -64.28301886792453
+        ],
+        "value_pos": [
+          -42.3359375,
+          54.908018867924525
+        ],
+        "refdes_manual": false,
+        "value_manual": false
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "WaveGenerator",
+      "pos": [
+        -1378.1132075471698,
+        -345.2830188679245
       ],
       "rotation": 0.0,
       "mirror": {
@@ -64,71 +70,22 @@
         "my": 1.0
       },
       "refdes": "W1",
-      "value": "WaveGen",
+      "value": "WaveGenerator",
+      "pl_source_id": -1,
       "labels": {
         "refdes_pos": [
           -13.1484375,
-          -55.01406799531067
+          -64.28301886792453
         ],
         "value_pos": [
-          -32.34375,
-          41.01406799531067
+          -50.1640625,
+          54.908018867924525
         ],
         "refdes_manual": false,
         "value_manual": false
-      }
-    },
-    {
-      "kind": "Ground",
-      "pos": [
-        -1100.0,
-        -20.0
-      ],
-      "rotation": 0.0,
-      "mirror": {
-        "mx": 1.0,
-        "my": 1.0
       },
-      "refdes": "GND",
-      "value": "GND",
-      "labels": {
-        "refdes_pos": [
-          -18.15625,
-          -43.625
-        ],
-        "value_pos": [
-          -11.0,
-          32.0
-        ],
-        "refdes_manual": false,
-        "value_manual": true
-      }
-    },
-    {
-      "kind": "Resistor",
-      "pos": [
-        -1100.0,
-        -200.0
-      ],
-      "rotation": 90.0,
-      "mirror": {
-        "mx": 1.0,
-        "my": 1.0
-      },
-      "refdes": "R1",
-      "value": "2.2k",
-      "labels": {
-        "refdes_pos": [
-          -33.4698215563526,
-          42.52573260286931
-        ],
-        "value_pos": [
-          0.08348713902216787,
-          52.05208079159888
-        ],
-        "refdes_manual": true,
-        "value_manual": true
-      }
+      "chip": {},
+      "chip_io": {}
     },
     {
       "kind": "1N4002",
@@ -143,6 +100,7 @@
       },
       "refdes": "D1",
       "value": "1N4002",
+      "pl_source_id": -1,
       "labels": {
         "refdes_pos": [
           -11.578125,
@@ -154,92 +112,98 @@
         ],
         "refdes_manual": false,
         "value_manual": false
-      }
-    }
-  ],
-  "texts": [
-    {
-      "text": "This resistor acts\nas a load, meaning\nwe place it so we\ncan read the output\nas the voltage across\nthe resistor. What \nwould happen if you\nincrease the resistance?",
-      "pos": [
-        -1081.5410525332259,
-        -276.5778133944681
-      ],
-      "style": {
-        "family": ".AppleSystemUIFont",
-        "point_size": 13,
-        "bold": false,
-        "italic": false,
-        "color": "#ebebeb",
-        "custom_color": ""
-      }
+      },
+      "chip": {},
+      "chip_io": {}
     },
     {
-      "text": "The key component here\nis the Diode (D1)! It acts\nas a check valve but for\nelectricity!!! What would\nhappen if you flip the\nDiode?",
+      "kind": "Resistor",
       "pos": [
-        -1287.5255322589867,
-        -445.8340537935596
+        -1100.0,
+        -200.0
       ],
-      "style": {
-        "family": ".AppleSystemUIFont",
-        "point_size": 13,
-        "bold": false,
-        "italic": false,
-        "color": "#ebebeb",
-        "custom_color": ""
-      }
+      "rotation": 90.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "R1",
+      "value": "2.2k",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -33.4698215563526,
+          42.52573260286931
+        ],
+        "value_pos": [
+          0.08348713902216787,
+          52.05208079159888
+        ],
+        "refdes_manual": true,
+        "value_manual": true
+      },
+      "chip": {},
+      "chip_io": {}
     },
     {
-      "text": "This is a Half Wave Rectifier. It recieves its name because it transforms a signal to only its positive values and all negatives values are ignored",
+      "kind": "Ground",
       "pos": [
-        -1437.8808674273587,
-        -573.310637992012
+        -1100.0,
+        -20.0
       ],
-      "style": {
-        "family": ".AppleSystemUIFont",
-        "point_size": 13,
-        "bold": false,
-        "italic": false,
-        "color": "#ebebeb",
-        "custom_color": ""
-      }
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "GND",
+      "value": "GND",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -18.15625,
+          -43.625
+        ],
+        "value_pos": [
+          -11.0,
+          32.0
+        ],
+        "refdes_manual": false,
+        "value_manual": true
+      },
+      "chip": {},
+      "chip_io": {}
     }
   ],
+  "texts": [],
   "wires": [
     {
       "points": [
         {
-          "x": -1360.0,
-          "y": -160.0
-        },
-        {
-          "x": -1320.0,
-          "y": -160.0
+          "x": -860.0,
+          "y": -60.0
         }
       ],
       "mode": "orth",
       "a": [
         0,
-        "+"
+        "-"
       ],
       "b_point": {
-        "x": -1320.0,
-        "y": -300.0
+        "x": -1100.0,
+        "y": -60.0
       }
     },
     {
       "points": [
         {
-          "x": -920.0,
-          "y": -220.0
-        },
-        {
-          "x": -920.0,
+          "x": -860.0,
           "y": -300.0
         }
       ],
       "mode": "orth",
       "a": [
-        1,
+        0,
         "+"
       ],
       "b_point": {
@@ -250,16 +214,8 @@
     {
       "points": [
         {
-          "x": -920.0,
-          "y": -180.0
-        },
-        {
-          "x": -920.0,
-          "y": -40.0
-        },
-        {
-          "x": -1100.0,
-          "y": -40.0
+          "x": -1300.0,
+          "y": -60.0
         }
       ],
       "mode": "orth",
@@ -267,55 +223,50 @@
         1,
         "-"
       ],
-      "b": [
-        3,
-        "A"
-      ]
+      "b_point": {
+        "x": -1100.0,
+        "y": -60.0
+      }
+    },
+    {
+      "points": [],
+      "mode": "orth",
+      "a": [
+        1,
+        "+"
+      ],
+      "b_point": {
+        "x": -1300.0,
+        "y": -280.0
+      }
     },
     {
       "points": [
         {
           "x": -1360.0,
-          "y": -120.0
+          "y": -280.0
         },
         {
-          "x": -1360.0,
-          "y": -40.0
+          "x": -1300.0,
+          "y": -280.0
         },
         {
-          "x": -1100.0,
-          "y": -40.0
+          "x": -1280.0,
+          "y": -280.0
+        },
+        {
+          "x": -1280.0,
+          "y": -300.0
         }
       ],
       "mode": "orth",
       "a": [
-        0,
-        "-"
+        2,
+        "+"
       ],
       "b": [
         3,
-        "A"
-      ]
-    },
-    {
-      "points": [
-        {
-          "x": -1100.0,
-          "y": -160.0
-        },
-        {
-          "x": -1100.0,
-          "y": -40.0
-        }
-      ],
-      "mode": "orth",
-      "a": [
-        4,
-        "B"
-      ],
-      "b": [
-        3,
-        "A"
+        "P1"
       ]
     },
     {
@@ -335,7 +286,7 @@
       ],
       "mode": "orth",
       "a": [
-        5,
+        3,
         "P2"
       ],
       "b": [
@@ -346,26 +297,22 @@
     {
       "points": [
         {
-          "x": -1360.0,
-          "y": -300.0
+          "x": -1100.0,
+          "y": -160.0
         },
         {
-          "x": -1320.0,
-          "y": -300.0
-        },
-        {
-          "x": -1240.0,
-          "y": -300.0
+          "x": -1100.0,
+          "y": -60.0
         }
       ],
       "mode": "orth",
       "a": [
-        2,
-        "+"
+        4,
+        "B"
       ],
       "b": [
         5,
-        "P1"
+        "A"
       ]
     }
   ],
@@ -376,12 +323,32 @@
     "snap_on": true,
     "wire_junctions": [
       {
+        "x": -1400.0,
+        "y": -90.0
+      },
+      {
         "x": -1320.0,
         "y": -300.0
       },
       {
+        "x": -1300.0,
+        "y": -280.0
+      },
+      {
         "x": -1100.0,
         "y": -300.0
+      },
+      {
+        "x": -1100.0,
+        "y": -60.0
+      },
+      {
+        "x": -1100.0,
+        "y": -40.0
+      },
+      {
+        "x": -880.0,
+        "y": -150.0
       }
     ],
     "net_names": []

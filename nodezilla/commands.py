@@ -35,9 +35,19 @@ class AddComponentCommand(QUndoCommand):
 
     def redo(self):
         self.scene.addItem(self.comp)
+        if getattr(self.scene, "snap_on", False) and hasattr(self.comp, "snap_scene_pos_to_pin_grid"):
+            try:
+                self.comp.setPos(self.comp.snap_scene_pos_to_pin_grid(self.comp.pos()))
+            except Exception:
+                pass
         theme = getattr(self.scene, "theme", None)
         if theme and hasattr(self.comp, "apply_theme"):
             self.comp.apply_theme(theme)
+        if hasattr(self.scene, "_reroute_wires_blocked_by_component"):
+            try:
+                self.scene._reroute_wires_blocked_by_component(self.comp)
+            except Exception:
+                pass
 
 
     def undo(self):
@@ -93,10 +103,22 @@ class MoveComponentCommand(QUndoCommand):
 
     def redo(self):
         self.comp.setPos(self.new)
+        sc = self.comp.scene()
+        if sc and hasattr(sc, "_reroute_wires_blocked_by_component"):
+            try:
+                sc._reroute_wires_blocked_by_component(self.comp)
+            except Exception:
+                pass
 
 
     def undo(self):
         self.comp.setPos(self.old)
+        sc = self.comp.scene()
+        if sc and hasattr(sc, "_reroute_wires_blocked_by_component"):
+            try:
+                sc._reroute_wires_blocked_by_component(self.comp)
+            except Exception:
+                pass
 
 
 class RotateComponentCommand(QUndoCommand):

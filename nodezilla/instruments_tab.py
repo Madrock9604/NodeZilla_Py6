@@ -134,6 +134,7 @@ class ScopeWaveformWidget(QWidget):
         self._autoscale = False
         self._sample_rate_hz = 1e5
         self._time_div_s = 1e-3
+        self._trigger_position_fraction = 0.5
         self._ch1_vdiv = 0.5
         self._ch2_vdiv = 0.5
         self._ch1_offset_v = 0.0
@@ -161,6 +162,7 @@ class ScopeWaveformWidget(QWidget):
         *,
         sample_rate_hz: float,
         time_div_s: float,
+        trigger_position_fraction: float,
         ch1_vdiv: float,
         ch2_vdiv: float,
         ch1_offset_v: float,
@@ -170,6 +172,7 @@ class ScopeWaveformWidget(QWidget):
     ):
         self._sample_rate_hz = max(1.0, float(sample_rate_hz))
         self._time_div_s = max(1e-6, float(time_div_s))
+        self._trigger_position_fraction = max(0.05, min(0.95, float(trigger_position_fraction)))
         self._ch1_vdiv = max(1e-3, float(ch1_vdiv))
         self._ch2_vdiv = max(1e-3, float(ch2_vdiv))
         self._ch1_offset_v = float(ch1_offset_v)
@@ -242,6 +245,9 @@ class ScopeWaveformWidget(QWidget):
             p.drawLine(plot.left(), y, plot.right(), y)
         p.setPen(center_pen)
         p.drawLine(plot.left(), int(plot.top() + h / 2), plot.right(), int(plot.top() + h / 2))
+        trig_x = int(plot.left() + self._trigger_position_fraction * (w - 1))
+        p.setPen(QPen(self._center_grid, 1))
+        p.drawLine(trig_x, plot.top(), trig_x, plot.bottom())
 
         ch1 = self._samples.get("ch1", [])
         ch2 = self._samples.get("ch2", [])
@@ -306,8 +312,9 @@ class ScopeWaveformWidget(QWidget):
         t_scale, t_unit = self._time_axis_unit(self._time_div_s)
         for i in range(0, 11):
             x = int(plot.left() + i * w / 10)
-            t = i * self._time_div_s * t_scale
-            p.drawText(x - 22, plot.bottom() + 16, 48, 14, Qt.AlignHCenter | Qt.AlignVCenter, str(int(round(t))))
+            rel_div = i - (10.0 * self._trigger_position_fraction)
+            t = rel_div * self._time_div_s * t_scale
+            p.drawText(x - 28, plot.bottom() + 16, 56, 14, Qt.AlignHCenter | Qt.AlignVCenter, str(int(round(t))))
         for i in range(0, vdivs + 1):
             y = int(plot.top() + i * h / vdivs)
             v1 = ch1_off_eff + ((vdivs / 2.0) - i) * ch1_vdiv_eff
@@ -326,7 +333,7 @@ class ScopeWaveformWidget(QWidget):
             plot.width(),
             top_pad - 2,
             Qt.AlignHCenter | Qt.AlignBottom,
-            f"Time base: {self._fmt_time(self._time_div_s)}/div  ({t_unit})",
+            f"Time base: {self._fmt_time(self._time_div_s)}/div  |  Trigger: 0 {t_unit}",
         )
 
     def apply_theme(self, theme):
@@ -451,6 +458,7 @@ class WavegenPanel(QWidget):
         self.ch1_preview.set_view(
             sample_rate_hz=10000.0,
             time_div_s=0.0002,
+            trigger_position_fraction=0.5,
             ch1_vdiv=0.5,
             ch2_vdiv=0.5,
             ch1_offset_v=0.0,
@@ -519,6 +527,7 @@ class WavegenPanel(QWidget):
         self.ch2_preview.set_view(
             sample_rate_hz=10000.0,
             time_div_s=0.0002,
+            trigger_position_fraction=0.5,
             ch1_vdiv=0.5,
             ch2_vdiv=0.5,
             ch1_offset_v=0.0,
@@ -900,6 +909,7 @@ class WavegenPanel(QWidget):
         self.ch1_preview.set_view(
             sample_rate_hz=fs1,
             time_div_s=td1,
+            trigger_position_fraction=0.5,
             ch1_vdiv=vdiv1,
             ch2_vdiv=vdiv1,
             ch1_offset_v=o1,
@@ -910,6 +920,7 @@ class WavegenPanel(QWidget):
         self.ch2_preview.set_view(
             sample_rate_hz=fs2,
             time_div_s=td2,
+            trigger_position_fraction=0.5,
             ch1_vdiv=vdiv2,
             ch2_vdiv=vdiv2,
             ch1_offset_v=o2,
@@ -970,6 +981,9 @@ class ScopePanel(QWidget):
         self.buffer_count.setToolTip("Script: Scope1.Buffer.value/text")
         self.update_mode = QComboBox()
         self.update_mode.addItems(["repeated", "shift", "screen", "record"])
+        self.update_interval = QComboBox()
+        self.update_interval.addItems(["60 ms", "100 ms", "200 ms", "500 ms", "1000 ms"])
+        self.update_interval.setCurrentText("100 ms")
         self.sample_rate = QComboBox()
         self.sample_rate.addItems(["1e3", "1e4", "5e4", "1e5", "5e5", "1e6"])
         self.sample_rate.setCurrentText("1e5")
@@ -1007,6 +1021,8 @@ class ScopePanel(QWidget):
         top.addWidget(self.buffer_count)
         top.addWidget(QLabel("Mode"))
         top.addWidget(self.update_mode)
+        top.addWidget(QLabel("Update"))
+        top.addWidget(self.update_interval)
         top.addWidget(QLabel("Fs"))
         top.addWidget(self.sample_rate)
         top.addWidget(QLabel("Time"))
@@ -1044,12 +1060,13 @@ class ScopePanel(QWidget):
         time_frame.setFrameShape(QFrame.StyledPanel)
         time_form = QFormLayout(time_frame)
         self.time_pos = QDoubleSpinBox()
-        self.time_pos.setRange(-10.0, 10.0)
-        self.time_pos.setDecimals(6)
-        self.time_pos.setSingleStep(0.001)
-        self.time_pos.setSuffix(" s")
-        self.time_pos.setValue(0.0)
-        time_form.addRow("Time Position", self.time_pos)
+        self.time_pos.setRange(5.0, 95.0)
+        self.time_pos.setDecimals(0)
+        self.time_pos.setSingleStep(5.0)
+        self.time_pos.setSuffix(" %")
+        self.time_pos.setValue(50.0)
+        self.time_pos.setToolTip("Horizontal trigger position on screen for repeated mode.")
+        time_form.addRow("Trigger Position", self.time_pos)
         time_form.addRow("Time Base", QLabel("Use top toolbar"))
         time_form.addRow("Sample Rate", QLabel("Use top toolbar"))
 
@@ -1130,10 +1147,12 @@ class ScopePanel(QWidget):
         self.sample_rate.currentTextChanged.connect(self._save_profile)
         self.buffer_count.valueChanged.connect(self._save_profile)
         self.time_div.currentTextChanged.connect(self._save_profile)
+        self.update_interval.currentTextChanged.connect(self._save_profile)
         self.ch1_vdiv.currentTextChanged.connect(self._save_profile)
         self.ch2_vdiv.currentTextChanged.connect(self._save_profile)
         self.ch1_offset.valueChanged.connect(self._save_profile)
         self.ch2_offset.valueChanged.connect(self._save_profile)
+        self.time_pos.valueChanged.connect(self._save_profile)
         self.autoscale_chk.toggled.connect(self._save_profile)
         self.update_mode.currentTextChanged.connect(self._save_profile)
         self.update_mode.currentTextChanged.connect(self._on_update_mode_changed)
@@ -1143,6 +1162,7 @@ class ScopePanel(QWidget):
         self.trigger_level.valueChanged.connect(self._save_profile)
         self.ch2_enable.toggled.connect(self._save_profile)
         self.ch2_enable.toggled.connect(self._sync_ch2_ui)
+        self.update_interval.currentTextChanged.connect(self._update_poll_interval)
         self.sample_rate.currentTextChanged.connect(self._schedule_live_reconfigure)
         self.buffer_count.valueChanged.connect(self._schedule_live_reconfigure)
         self.time_div.currentTextChanged.connect(self._schedule_live_reconfigure)
@@ -1154,6 +1174,7 @@ class ScopePanel(QWidget):
         self.trigger_source.currentTextChanged.connect(self._schedule_live_reconfigure)
         self.trigger_edge.currentTextChanged.connect(self._schedule_live_reconfigure)
         self.trigger_level.valueChanged.connect(self._schedule_live_reconfigure)
+        self.time_pos.valueChanged.connect(self._schedule_live_reconfigure)
         self.ch2_enable.toggled.connect(self._schedule_live_reconfigure)
         self._load_profile()
         self._set_running(False)
@@ -1214,6 +1235,16 @@ class ScopePanel(QWidget):
         ch2_offset = float(self.ch2_offset.value())
         return fs, disp_buf, cap_buf, ch1_range, ch2_range, ch1_offset, ch2_offset, time_div_s
 
+    @staticmethod
+    def _parse_update_interval_ms(text: str) -> int:
+        try:
+            return max(30, int(float(text.split("ms")[0].strip())))
+        except Exception:
+            return 100
+
+    def _trigger_position_fraction(self) -> float:
+        return max(0.05, min(0.95, float(self.time_pos.value()) / 100.0))
+
     def _apply_config(self, quiet: bool = False):
         fs, disp_buf, cap_buf, ch1_range, ch2_range, ch1_offset, ch2_offset, _ = self._scope_params()
         self._display_buffer_size = int(disp_buf)
@@ -1236,10 +1267,7 @@ class ScopePanel(QWidget):
         return ok
 
     def _update_poll_interval(self):
-        _, _, _, _, _, _, _, time_div_s = self._scope_params()
-        span_ms = 10.0 * time_div_s * 1000.0
-        # Fewer UI updates for long time spans keeps trigger stable and CPU low.
-        interval_ms = int(max(60.0, min(1000.0, span_ms * 0.20)))
+        interval_ms = self._parse_update_interval_ms(self.update_interval.currentText())
         self.timer.setInterval(interval_ms)
 
     def _single_requested(self):
@@ -1352,6 +1380,7 @@ class ScopePanel(QWidget):
         self.wave.set_view(
             sample_rate_hz=fs,
             time_div_s=time_div_s,
+            trigger_position_fraction=self._trigger_position_fraction(),
             ch1_vdiv=self._parse_vdiv(self.ch1_vdiv.currentText()),
             ch2_vdiv=self._parse_vdiv(self.ch2_vdiv.currentText()),
             ch1_offset_v=ch1_offset,
@@ -1431,7 +1460,7 @@ class ScopePanel(QWidget):
         display_size = max(64, min(display_size, n))
         level = float(self.trigger_level.value())
         rising = self.trigger_edge.currentText() == "rising"
-        target = max(1, display_size // 10)
+        target = max(1, min(display_size - 2, int(round(display_size * self._trigger_position_fraction()))))
         candidates: List[float] = []
         for i in range(1, n):
             a = sig[i - 1]
@@ -1496,11 +1525,9 @@ class ScopePanel(QWidget):
         mode = self.update_mode.currentText()
 
         if mode == "repeated":
-            # In repeated mode, trust hardware trigger timing and display the
-            # most recent capture window directly. Software re-triggering
-            # introduces phase hopping when many threshold crossings exist.
-            a1 = self._ensure_display_len(ch1, display_size)
-            a2 = self._ensure_display_len(ch2, display_size) if ch2 else []
+            # Anchor the display to the trigger crossing so periodic sources
+            # from the wavegen remain visually steady.
+            a1, a2 = self._extract_trigger_window(ch1, ch2, display_size)
             self._display_ch1 = list(a1)
             self._display_ch2 = list(a2)
             return a1, a2
@@ -1659,10 +1686,12 @@ class ScopePanel(QWidget):
         self._settings.setValue(f"{base}/sample_rate", self.sample_rate.currentText())
         self._settings.setValue(f"{base}/buffer_count", int(self.buffer_count.value()))
         self._settings.setValue(f"{base}/time_div", self.time_div.currentText())
+        self._settings.setValue(f"{base}/update_interval", self.update_interval.currentText())
         self._settings.setValue(f"{base}/ch1_vdiv", self.ch1_vdiv.currentText())
         self._settings.setValue(f"{base}/ch2_vdiv", self.ch2_vdiv.currentText())
         self._settings.setValue(f"{base}/ch1_offset_v", float(self.ch1_offset.value()))
         self._settings.setValue(f"{base}/ch2_offset_v", float(self.ch2_offset.value()))
+        self._settings.setValue(f"{base}/trigger_position_pct", float(self.time_pos.value()))
         self._settings.setValue(f"{base}/autoscale", bool(self.autoscale_chk.isChecked()))
         self._settings.setValue(f"{base}/update_mode", self.update_mode.currentText())
         self._settings.setValue(f"{base}/trigger_mode", self.trigger_mode.currentText())
@@ -1676,10 +1705,12 @@ class ScopePanel(QWidget):
         fs = str(self._settings.value(f"{base}/sample_rate", "1e5"))
         bcount = int(self._settings.value(f"{base}/buffer_count", 10))
         tdiv = str(self._settings.value(f"{base}/time_div", "1 ms/div"))
+        upd = str(self._settings.value(f"{base}/update_interval", "100 ms"))
         ch1v = str(self._settings.value(f"{base}/ch1_vdiv", "500 mV/div"))
         ch2v = str(self._settings.value(f"{base}/ch2_vdiv", "500 mV/div"))
         ch1off = float(self._settings.value(f"{base}/ch1_offset_v", 0.0))
         ch2off = float(self._settings.value(f"{base}/ch2_offset_v", 0.0))
+        trig_pos = float(self._settings.value(f"{base}/trigger_position_pct", 50.0))
         autoscale = str(self._settings.value(f"{base}/autoscale", "false")).lower() in (
             "1",
             "true",
@@ -1701,12 +1732,15 @@ class ScopePanel(QWidget):
         self.buffer_count.setValue(max(1, min(64, bcount)))
         if self.time_div.findText(tdiv) >= 0:
             self.time_div.setCurrentText(tdiv)
+        if self.update_interval.findText(upd) >= 0:
+            self.update_interval.setCurrentText(upd)
         if self.ch1_vdiv.findText(ch1v) >= 0:
             self.ch1_vdiv.setCurrentText(ch1v)
         if self.ch2_vdiv.findText(ch2v) >= 0:
             self.ch2_vdiv.setCurrentText(ch2v)
         self.ch1_offset.setValue(ch1off)
         self.ch2_offset.setValue(ch2off)
+        self.time_pos.setValue(max(5.0, min(95.0, trig_pos)))
         self.autoscale_chk.setChecked(autoscale)
         if self.update_mode.findText(upmode) >= 0:
             self.update_mode.setCurrentText(upmode)

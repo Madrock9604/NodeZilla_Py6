@@ -1,8 +1,10 @@
 {
-  "kind": "LM358",
+  "kind": "LM358_B",
   "display_name": "LM358",
-  "category": "Semiconductor / OpAmps",
-  "prefix": "x",
+  "category": "Semiconductor / OpAmp / LM358",
+  "prefix": "U",
+  "multipart_family": "LM358",
+  "unit_name": "B",
   "shortcut": "",
   "spice_type": "X",
   "value_label": "Part Number",
@@ -10,34 +12,27 @@
   "default_value": "LM358",
   "type": "component",
   "net_name": "",
-  "symbol": "custom/LM358.json",
+  "symbol": "custom/LM358_B.json",
   "auto_align_terminals": false,
   "auto_scale_symbol": false,
   "ports": [
     {
-      "name": "+",
+      "name": "IN2+",
+      "pin_number": 5,
       "x": -45.71428571428571,
       "y": -15.238095238095237
     },
     {
-      "name": "-",
+      "name": "IN2-",
+      "pin_number": 6,
       "x": -45.71428571428571,
       "y": 15.238095238095237
     },
     {
-      "name": "Out",
+      "name": "OUT2",
+      "pin_number": 7,
       "x": 45.71428571428571,
       "y": 0.0
-    },
-    {
-      "name": "V+",
-      "x": 0.0,
-      "y": -30.476190476190474
-    },
-    {
-      "name": "P5",
-      "x": 0.0,
-      "y": 30.476190476190474
     }
   ]
 }

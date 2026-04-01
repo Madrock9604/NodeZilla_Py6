@@ -63,8 +63,9 @@ class ComponentPanel(QWidget):
                     categories[key] = node
                 parent = node
             label = comp.display_name
-            if comp.shortcut:
-                label = f"{label}  ({comp.shortcut})"
+            unit_name = str(getattr(comp, "unit_name", "") or "").strip()
+            if unit_name:
+                label = f"{label} [{unit_name}]"
             item = QTreeWidgetItem([label])
             item.setData(0, Qt.UserRole, comp.kind)
             item.setToolTip(0, f"{comp.category} • {comp.kind} • {len(comp.ports)} pins")

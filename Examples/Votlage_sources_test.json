@@ -1,0 +1,254 @@
+{
+  "components": [
+    {
+      "kind": "Oscilloscope",
+      "pos": [
+        -301.8867924528302,
+        -265.2830188679245
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": -1.0,
+        "my": 1.0
+      },
+      "refdes": "O2",
+      "value": "Oscilloscope",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -12.78125,
+          -64.28301886792453
+        ],
+        "value_pos": [
+          70.58685319767446,
+          -71.08453927161035
+        ],
+        "refdes_manual": false,
+        "value_manual": true
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "Oscilloscope",
+      "pos": [
+        -501.88679245283015,
+        -265.2830188679245
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "O1",
+      "value": "Oscilloscope",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -11.875,
+          -64.28301886792453
+        ],
+        "value_pos": [
+          13.602667151162791,
+          -70.56174857393596
+        ],
+        "refdes_manual": false,
+        "value_manual": true
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "Ground",
+      "pos": [
+        -400.0,
+        -80.0
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "GND",
+      "value": "GND",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -18.15625,
+          -43.625
+        ],
+        "value_pos": [
+          56.0,
+          -12.0
+        ],
+        "refdes_manual": false,
+        "value_manual": false
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "5V+",
+      "pos": [
+        -600.0,
+        -120.0
+      ],
+      "rotation": 270.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "P1",
+      "value": "5V+",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -10.984375,
+          -38.0
+        ],
+        "value_pos": [
+          56.0,
+          -12.0
+        ],
+        "refdes_manual": false,
+        "value_manual": false
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "5V-",
+      "pos": [
+        -200.0,
+        -120.0
+      ],
+      "rotation": 270.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "P2",
+      "value": "5V-",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -11.890625,
+          -38.0
+        ],
+        "value_pos": [
+          56.0,
+          -12.0
+        ],
+        "refdes_manual": false,
+        "value_manual": false
+      },
+      "chip": {},
+      "chip_io": {}
+    }
+  ],
+  "texts": [],
+  "wires": [
+    {
+      "points": [
+        {
+          "x": -480.0,
+          "y": -120.0
+        },
+        {
+          "x": -400.0,
+          "y": -120.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        1,
+        "-"
+      ],
+      "b": [
+        2,
+        "A"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -520.0,
+          "y": -120.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        1,
+        "+"
+      ],
+      "b": [
+        3,
+        "A"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -320.0,
+          "y": -120.0
+        },
+        {
+          "x": -400.0,
+          "y": -120.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        0,
+        "-"
+      ],
+      "b": [
+        2,
+        "A"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -280.0,
+          "y": -120.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        0,
+        "+"
+      ],
+      "b": [
+        4,
+        "A"
+      ]
+    }
+  ],
+  "settings": {
+    "grid_on": true,
+    "grid_size": 20,
+    "grid_style": "dots",
+    "snap_on": true,
+    "wire_junctions": [
+      {
+        "x": -470.0073,
+        "y": -229.9817
+      },
+      {
+        "x": -400.0,
+        "y": -160.0
+      },
+      {
+        "x": -400.0,
+        "y": -100.0
+      },
+      {
+        "x": -329.9927,
+        "y": -229.9817
+      }
+    ],
+    "net_names": []
+  },
+  "_format": 2
+}

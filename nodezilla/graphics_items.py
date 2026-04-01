@@ -70,12 +70,13 @@ class InlineLabel(QGraphicsTextItem):
 
 class PortItem(QGraphicsEllipseItem):
     """Terminal pin on a ComponentItem; drives wire updates."""
-    def __init__(self, parent: 'ComponentItem', name: str, rel_pos: QPointF):
+    def __init__(self, parent: 'ComponentItem', name: str, rel_pos: QPointF, pin_number: int | None = None):
         super().__init__(-PORT_RADIUS, -PORT_RADIUS, 2*PORT_RADIUS, 2*PORT_RADIUS, parent)
         self.setBrush(QBrush(Qt.white))
         self.setPen(QPen(Qt.black, 1.25))
         self.setZValue(2)
         self.name = name
+        self.pin_number = pin_number
         self.rel_pos = rel_pos
         self.setPos(rel_pos)
         self.wires: List['WireItem'] = []
@@ -235,6 +236,7 @@ class ComponentItem(QGraphicsRectItem):
 
         # symbol
         self.symbol_item: QGraphicsPathItem | None = None
+        self.symbol_text_items: List[QGraphicsTextItem] = []
 
         # ports
         self.ports: List[PortItem] = []
@@ -246,12 +248,12 @@ class ComponentItem(QGraphicsRectItem):
         if self._comp_def and self._comp_def.ports:
             for pd in self._comp_def.ports:
                 port_pos = QPointF(pd.x, pd.y)
-                self.ports.append(PortItem(self, pd.name, port_pos))
+                self.ports.append(PortItem(self, pd.name, port_pos, getattr(pd, "pin_number", None)))
         else:
             # Fallback for unknown parts: default two terminals.
             self.ports = [
-                PortItem(self, 'A', QPointF(-COMP_WIDTH/2, 0)),
-                PortItem(self, 'B', QPointF(COMP_WIDTH/2, 0)),
+                PortItem(self, 'A', QPointF(-COMP_WIDTH/2, 0), None),
+                PortItem(self, 'B', QPointF(COMP_WIDTH/2, 0), None),
             ]
 
         self.port_left = self.ports[0] if self.ports else None
@@ -277,6 +279,19 @@ class ComponentItem(QGraphicsRectItem):
         # for undoable moves
         self._press_pos: Optional[QPointF] = None
 
+    def multipart_family(self) -> str:
+        return str(getattr(self._comp_def, "multipart_family", "") or "").strip()
+
+    def unit_name(self) -> str:
+        return str(getattr(self._comp_def, "unit_name", "") or "").strip()
+
+    def display_refdes(self) -> str:
+        base = (self.refdes or "").strip()
+        unit = self.unit_name()
+        if base and unit:
+            return f"{base}{unit}"
+        return base
+
     def _load_chip_template(self, rel_path: str) -> dict:
         try:
             p = (user_assets_root() / "chips" / str(rel_path).replace("\\", "/")).resolve()
@@ -285,7 +300,7 @@ class ComponentItem(QGraphicsRectItem):
         except Exception:
             return {}
 
-    def _replace_ports(self, port_defs: list[tuple[str, QPointF]]):
+    def _replace_ports(self, port_defs: list[tuple[str, QPointF, int | None]]):
         # Ports are child items; replacing them is safe before wiring.
         old_ports = list(getattr(self, "ports", []))
         for p in old_ports:
@@ -294,7 +309,7 @@ class ComponentItem(QGraphicsRectItem):
                     p.scene().removeItem(p)
             except Exception:
                 pass
-        self.ports = [PortItem(self, name, pos) for (name, pos) in port_defs]
+        self.ports = [PortItem(self, name, pos, pin_number) for (name, pos, pin_number) in port_defs]
         self.port_left = self.ports[0] if self.ports else None
         self.port_right = self.ports[1] if len(self.ports) > 1 else None
         self.prepareGeometryChange()
@@ -334,7 +349,7 @@ class ComponentItem(QGraphicsRectItem):
         self._apply_symbol_theme()
 
     def _add_debug_overlay(self):
-        # Bright magenta crosshair and label to confirm placement/visibility.
+        # Bright debug geometry to make the routing keep-out obvious.
         cross = QPainterPath()
         cross.moveTo(-8, 0); cross.lineTo(8, 0)
         cross.moveTo(0, -8); cross.lineTo(0, 8)
@@ -342,18 +357,28 @@ class ComponentItem(QGraphicsRectItem):
         pen = QPen(QColor(255, 0, 255), 1.5)
         pen.setCosmetic(True)
         self._debug_cross.setPen(pen)
-        self._debug_cross.setZValue(5)
-        self._debug_label = QGraphicsTextItem(self.kind, self)
-        self._debug_label.setDefaultTextColor(QColor(255, 0, 255))
-        self._debug_label.setPos(10, 10)
-        self._debug_label.setZValue(5)
+        self._debug_cross.setZValue(8)
+        try:
+            rect = self.forbidden_local_rect().normalized()
+        except Exception:
+            rect = QRectF(-COMP_WIDTH / 2, -COMP_HEIGHT / 2, COMP_WIDTH, COMP_HEIGHT)
+        self._debug_forbidden_rect = QGraphicsRectItem(rect, self)
+        rect_pen = QPen(QColor(0, 255, 255), 2.0, Qt.DashLine)
+        rect_pen.setCosmetic(True)
+        self._debug_forbidden_rect.setPen(rect_pen)
+        self._debug_forbidden_rect.setBrush(QBrush(QColor(0, 255, 255, 28)))
+        self._debug_forbidden_rect.setZValue(7)
+        self._debug_label = QGraphicsTextItem(f"{self.kind} keep-out", self)
+        self._debug_label.setDefaultTextColor(QColor(0, 255, 255))
+        self._debug_label.setPos(rect.left(), rect.top() - 18)
+        self._debug_label.setZValue(8)
 
     def _update_label(self):
         """Update label text/visibility and place defaults if not manually moved."""
         from PySide6.QtWidgets import QApplication
         sc = self.scene()
         theme = getattr(sc, "theme", None) if sc else None
-        ref_text = self.refdes.strip()
+        ref_text = self.display_refdes().strip()
         val_text = self.value.strip()
         is_net = bool(self._comp_def and getattr(self._comp_def, "comp_type", "component") == "net")
         if theme:
@@ -431,7 +456,11 @@ class ComponentItem(QGraphicsRectItem):
             self.pin_labels.append(t)
 
     def set_refdes(self, refdes: str):
-        self.refdes = refdes
+        text = (refdes or "").strip()
+        unit = self.unit_name()
+        if unit and text.upper().endswith(unit.upper()) and len(text) > len(unit):
+            text = text[:-len(unit)]
+        self.refdes = text
         self._update_label()
 
     def set_value(self, value: str):
@@ -487,13 +516,13 @@ class ComponentItem(QGraphicsRectItem):
 
         left_n = (n + 1) // 2
         right_n = n - left_n
-        port_defs: list[tuple[str, QPointF]] = []
+        port_defs: list[tuple[str, QPointF, int | None]] = []
         idx = 1
         for y in spread_y(left_n):
-            port_defs.append((str(idx), QPointF(-COMP_WIDTH / 2, y)))
+            port_defs.append((str(idx), QPointF(-COMP_WIDTH / 2, y), idx))
             idx += 1
         for y in spread_y(right_n):
-            port_defs.append((str(idx), QPointF(COMP_WIDTH / 2, y)))
+            port_defs.append((str(idx), QPointF(COMP_WIDTH / 2, y), idx))
             idx += 1
         self._replace_ports(port_defs)
 
@@ -572,8 +601,26 @@ class ComponentItem(QGraphicsRectItem):
                 r = r.united(p.mapRectToParent(p.boundingRect()))
         return r
 
+    def forbidden_local_rect(self) -> QRectF:
+        """Keep-out rect for routing around the component body/symbol.
+
+        Unlike routing_local_rect(), this intentionally excludes terminals so a
+        wire may still approach a pin directly without the body itself becoming
+        pass-through space.
+        """
+        r = QRectF(-COMP_WIDTH / 2, -COMP_HEIGHT / 2, COMP_WIDTH, COMP_HEIGHT)
+        if self.symbol_item is not None:
+            r = r.united(self.symbol_item.mapRectToParent(self.symbol_item.boundingRect()))
+        return r
+
     def routing_scene_rect(self, pad: float = 0.0) -> QRectF:
         rr = self.mapRectToScene(self.routing_local_rect()).normalized()
+        if pad:
+            rr = rr.adjusted(-pad, -pad, pad, pad)
+        return rr
+
+    def forbidden_scene_rect(self, pad: float = 0.0) -> QRectF:
+        rr = self.mapRectToScene(self.forbidden_local_rect()).normalized()
         if pad:
             rr = rr.adjusted(-pad, -pad, pad, pad)
         return rr
@@ -591,6 +638,15 @@ class ComponentItem(QGraphicsRectItem):
     
     def _load_symbol_graphic(self):
         """Load a JSON symbol and convert it to a QPainterPath."""
+        for text_item in getattr(self, "symbol_text_items", []):
+            try:
+                text_item.setParentItem(None)
+                sc = self.scene()
+                if sc is not None:
+                    sc.removeItem(text_item)
+            except Exception:
+                pass
+        self.symbol_text_items = []
         path = self._symbol_path_for_kind()
         if path is None:
             self.symbol_item = None
@@ -620,6 +676,14 @@ class ComponentItem(QGraphicsRectItem):
                         p.moveTo(pts[0][0], pts[0][1])
                         for x, y in pts[1:]:
                             p.lineTo(x, y)
+                elif t == "text":
+                    txt = QGraphicsTextItem(str(shape.get("text", "")), self)
+                    font = txt.font()
+                    font.setPointSize(int(shape.get("font_size", 12)))
+                    txt.setFont(font)
+                    txt.setPos(float(shape.get("x", 0.0)), float(shape.get("y", 0.0)))
+                    txt.setZValue(2.5)
+                    self.symbol_text_items.append(txt)
             if p.isEmpty():
                 p = QPainterPath()
                 p.addRect(-COMP_WIDTH / 2, -COMP_HEIGHT / 2, COMP_WIDTH, COMP_HEIGHT)
@@ -668,16 +732,28 @@ class ComponentItem(QGraphicsRectItem):
         center = br.center()
         self.symbol_item.setPos(-center.x() * scale, -center.y() * scale)
 
+        def _snap_local(p: QPointF) -> QPointF:
+            # Keep terminal centers on the schematic grid after symbol scaling.
+            grid = 20.0
+            try:
+                sc = self.scene()
+                grid = float(getattr(sc, "grid_size", 20) or 20)
+            except Exception:
+                grid = 20.0
+            if grid <= 0:
+                grid = 20.0
+            return QPointF(round(p.x() / grid) * grid, round(p.y() / grid) * grid)
+
         # Optionally align 1/2-terminal parts to symbol ends.
         if self._auto_align_terminals and getattr(self, "ports", None) and len(self.ports) in (1, 2):
             br_local = self.symbol_item.boundingRect()
             br_mapped = self.symbol_item.mapRectToParent(br_local)
             if len(self.ports) == 1:
-                top_center = QPointF(br_mapped.center().x(), br_mapped.top())
+                top_center = _snap_local(QPointF(br_mapped.center().x(), br_mapped.top()))
                 self.ports[0].setPos(top_center)
             else:
-                left_center = QPointF(br_mapped.left(), br_mapped.center().y())
-                right_center = QPointF(br_mapped.right(), br_mapped.center().y())
+                left_center = _snap_local(QPointF(br_mapped.left(), br_mapped.center().y()))
+                right_center = _snap_local(QPointF(br_mapped.right(), br_mapped.center().y()))
                 self.ports[0].setPos(left_center)
                 self.ports[1].setPos(right_center)
 
@@ -707,14 +783,44 @@ class ComponentItem(QGraphicsRectItem):
             pen.setColor(color)
             pen.setWidthF(2)
             self.symbol_item.setPen(pen)
+        for text_item in getattr(self, "symbol_text_items", []):
+            text_item.setDefaultTextColor(color)
+
+    def _grid_size(self) -> float:
+        scene = self.scene()
+        try:
+            grid = float(getattr(scene, "grid_size", 20) or 20)
+        except Exception:
+            grid = 20.0
+        return grid if grid > 0 else 20.0
+
+    def _snap_point_to_grid(self, p: QPointF) -> QPointF:
+        grid = self._grid_size()
+        return QPointF(round(p.x() / grid) * grid, round(p.y() / grid) * grid)
+
+    def _port_anchor_offset(self) -> QPointF:
+        ports = [p for p in getattr(self, "ports", []) if p is not None]
+        if not ports:
+            return QPointF(0.0, 0.0)
+        anchor = ports[0]
+        scene = self.scene()
+        if scene is not None:
+            try:
+                return anchor.scenePos() - self.scenePos()
+            except Exception:
+                pass
+        # Fallback before the item is in a scene: use current local geometry.
+        return QPointF(anchor.pos())
+
+    def snap_scene_pos_to_pin_grid(self, scene_pos: QPointF) -> QPointF:
+        offset = self._port_anchor_offset()
+        return self._snap_point_to_grid(scene_pos + offset) - offset
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionChange:
             scene = self.scene()
             if scene and getattr(scene, 'snap_on', False):
-                g = getattr(scene, 'grid_size', 20)
-                p = value
-                return QPointF(round(p.x()/g)*g, round(p.y()/g)*g)
+                return self.snap_scene_pos_to_pin_grid(QPointF(value))
 
         if change in (QGraphicsItem.ItemPositionHasChanged, QGraphicsItem.ItemTransformHasChanged):
             if getattr(self, 'ports', None):
@@ -893,6 +999,7 @@ class WireItem(QGraphicsPathItem):
         return out
 
     def update_path(self):
+        sc = self.scene()
         pts = self.render_points()
         if not pts:
             self.setPath(QPainterPath())
@@ -901,7 +1008,6 @@ class WireItem(QGraphicsPathItem):
         for q in pts[1:]:
             p.lineTo(q)
         self.setPath(p)
-        sc = self.scene()
         if sc and hasattr(sc, "_rebuild_junction_markers"):
             sc._rebuild_junction_markers()
         self._sync_handles()

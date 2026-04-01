@@ -1,0 +1,31 @@
+{
+  "board_count": 0,
+  "boards": [
+    "(empty)",
+    "(empty)",
+    "(empty)",
+    "(empty)"
+  ],
+  "positions": [
+    {
+      "position": "Top Left",
+      "board_number": null,
+      "card": "(empty)"
+    },
+    {
+      "position": "Top Right",
+      "board_number": 1,
+      "card": "(empty)"
+    },
+    {
+      "position": "Bottom Left",
+      "board_number": null,
+      "card": "(empty)"
+    },
+    {
+      "position": "Bottom Right",
+      "board_number": null,
+      "card": "(empty)"
+    }
+  ]
+}

@@ -53,6 +53,18 @@ def user_pl_path() -> Path:
     return user_root() / "PL.txt"
 
 
+def user_hardware_root() -> Path:
+    return user_root() / "Hardware"
+
+
+def user_hardware_cards_dir() -> Path:
+    return user_hardware_root() / "Cards"
+
+
+def user_hardware_configs_dir() -> Path:
+    return user_hardware_root() / "Configs"
+
+
 def _copy_missing_tree(src: Path, dst: Path):
     if not src.exists():
         return
@@ -75,12 +87,16 @@ def ensure_user_workspace():
     user_library_root().mkdir(parents=True, exist_ok=True)
     user_symbols_root().mkdir(parents=True, exist_ok=True)
     user_chips_root().mkdir(parents=True, exist_ok=True)
+    user_hardware_root().mkdir(parents=True, exist_ok=True)
+    user_hardware_cards_dir().mkdir(parents=True, exist_ok=True)
+    user_hardware_configs_dir().mkdir(parents=True, exist_ok=True)
 
     b = bundled_root()
     _copy_missing_tree(b / "Examples", user_examples_dir())
     _copy_missing_tree(b / "assets" / "components" / "library", user_library_root())
     _copy_missing_tree(b / "assets" / "symbols", user_symbols_root())
     _copy_missing_tree(b / "assets" / "chips", user_chips_root())
+    _copy_missing_tree(b / "assets" / "hardware_cards", user_hardware_cards_dir())
     # Optional app icon used for title-bar/dock/taskbar.
     for icon_name in ("app_icon.png", "app_icon.ico", "app_icon.icns", "icon.png", "icon.ico", "icon.icns"):
         src_icon = b / "assets" / icon_name

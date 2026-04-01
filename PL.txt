@@ -18,14 +18,32 @@ rR1 31 30 2.2e3
 *qU1 29 28 27 26 25 24 23 22 21 20 19 18 17 16 CD4007 *Need to verify SPICE format*
 dD4 14 15 1N4002
 dD3 12 13 1N4002
-dD2 10 11 1N4002
-dD1 8 9 1N4002
-*xU1 0 1 2 3 4 5 6 7 LM358 *Need to verify SPICE format*
-XW1 9 WaveGen
-XW2 10 WaveGen
-*vV1 0 *Still need to verify on SPICE*
-*vV2 1 *Still need to verify on SPICE*
-XO1 3 4 Oscope
-XO2 5 6 Oscope
+XW1 9 WaveGenerator
+XW2 10 WaveGenerator
+XO1 3 4 Oscilloscope
+XO2 5 6 Oscilloscope
 *tT1 7 *Need to verify for SPICE*
 *tT2 8 *Need to verify for SPICE*
+cC4 126 127 33e-09
+cC3 124 125 22e-09
+cC2 122 123 15e-09
+cC1 120 121 10e-09
+lL4 118 119 82e-03
+lL3 116 117 68e-03
+lL2 114 115 56e-03
+lL1 112 113 47e-03
+rR9 110 111 15e3
+rR8 108 109 12e3
+rR7 106 107 10e3
+rR6 104 105 8.2e3
+rR5 102 103 6.8e3
+rR4 100 101 5.6e3
+rR3 98 99 4.7e3
+rR2 96 97 3.9e3
+rR1 94 95 2.2e3
+*qU1 93 92 91 90 89 88 87 86 85 84 83 82 81 80 CD4007 *Need to verify SPICE format*
+dD4 78 79 1N4002
+dD3 76 77 1N4002
+dD2 74 75 1N4002
+dD1 72 73 1N4002
+*xU1 64 65 66 67 68 69 70 71 LM358 *Need to verify SPICE format*

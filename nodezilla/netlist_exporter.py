@@ -15,6 +15,46 @@ from typing import Callable, Dict, List, Tuple
 from .graphics_items import ComponentItem, WireItem
 
 
+def _component_display_refdes(component) -> str:
+    try:
+        if hasattr(component, "display_refdes"):
+            return str(component.display_refdes() or "").strip()
+    except Exception:
+        pass
+    return str(getattr(component, "refdes", "") or getattr(component, "kind", "")).strip()
+
+
+def _family_pin_catalog(kind: str, comp_defs) -> List[ComponentPin]:
+    cdef = comp_defs.get(kind) if comp_defs is not None else None
+    family = str(getattr(cdef, "multipart_family", "") or "").strip() if cdef else ""
+    if not family:
+        return []
+    pins: List[ComponentPin] = []
+    seen: set[tuple[int | None, str]] = set()
+    for other in comp_defs.all() if comp_defs is not None else []:
+        if str(getattr(other, "multipart_family", "") or "").strip() != family:
+            continue
+        unit = str(getattr(other, "unit_name", "") or "").strip()
+        for port in getattr(other, "ports", []) or []:
+            name = f"{unit}.{port.name}" if unit else str(port.name)
+            key = (getattr(port, "pin_number", None), name)
+            if key in seen:
+                continue
+            seen.add(key)
+            pins.append(ComponentPin(name=name, net="OPEN", pin_number=getattr(port, "pin_number", None)))
+    pins.sort(key=lambda p: (p.pin_number is None, p.pin_number if p.pin_number is not None else 10**9, p.name))
+    return pins
+
+
+def _net_is_assigned(net: Dict) -> bool:
+    if (net.get("label_name") or "").strip():
+        return True
+    if net.get("wires"):
+        return True
+    connections = net.get("connections", []) or []
+    return len(connections) > 1
+
+
 @dataclass
 class NetConnection:
     """A single connection between a component port and a net."""
@@ -41,6 +81,12 @@ class Component:
     value: str
     pins: List["ComponentPin"] = field(default_factory=list)
     spice_type: str = ""
+    display_name: str = ""
+    multipart_family: str = ""
+    unit_name: str = ""
+    package_refdes: str = ""
+    pl_source_id: int = -1
+    family_pin_defs: List["ComponentPin"] = field(default_factory=list)
 
 
 @dataclass
@@ -49,6 +95,7 @@ class ComponentPin:
 
     name: str
     net: str
+    pin_number: int | None = None
 
 
 @dataclass
@@ -167,6 +214,7 @@ class SpiceNetlistFormatter:
         port_order: Tuple[str, str] = ("A", "B"),
         ground_node: str = "0",
         floating_node: str = "NC",
+        combine_multipart_packages: bool = True,
         type_resolver: Callable[[Component], str] | None = None,
         name_resolver: Callable[[Component], str] | None = None,
         value_resolver: Callable[[Component], str] | None = None,
@@ -176,6 +224,7 @@ class SpiceNetlistFormatter:
         self._port_order = port_order
         self._ground_node = ground_node
         self._floating_node = floating_node
+        self._combine_multipart_packages = bool(combine_multipart_packages)
         self._type_resolver = type_resolver or self._default_component_type
         self._name_resolver = name_resolver or self._default_component_name
         self._value_resolver = value_resolver or self._default_component_value
@@ -184,7 +233,7 @@ class SpiceNetlistFormatter:
     def __call__(self, netlist: Netlist) -> str:
         """Render SPICE lines using per-pin net mapping."""
         lines: List[str] = [f"* {self._title}"]
-        for comp in sorted(netlist.components, key=lambda c: c.refdes or c.kind):
+        for comp in self._components_for_output(netlist):
             refdes = self._name_resolver(comp)
             prefix = self._type_resolver(comp)
             if getattr(comp, "pins", None):
@@ -209,6 +258,76 @@ class SpiceNetlistFormatter:
         if name.strip().upper() in {"GND", "GROUND", "0"}:
             return self._ground_node
         return name
+
+    def _components_for_output(self, netlist: Netlist) -> List[Component]:
+        components = sorted(netlist.components, key=lambda c: c.refdes or c.kind)
+        if not self._combine_multipart_packages:
+            return components
+
+        grouped: Dict[Tuple[str, str], List[Component]] = {}
+        for comp in components:
+            family = str(getattr(comp, "multipart_family", "") or "").strip()
+            package_ref = str(getattr(comp, "package_refdes", "") or comp.refdes or "").strip()
+            if family and package_ref:
+                grouped.setdefault((package_ref, family), []).append(comp)
+
+        out: List[Component] = []
+        emitted: set[Tuple[str, str]] = set()
+        for comp in components:
+            family = str(getattr(comp, "multipart_family", "") or "").strip()
+            package_ref = str(getattr(comp, "package_refdes", "") or comp.refdes or "").strip()
+            key = (package_ref, family)
+            if family and package_ref:
+                if key in emitted:
+                    continue
+                emitted.add(key)
+                out.append(self._merge_multipart_components(grouped.get(key, [comp])))
+            else:
+                out.append(comp)
+        return out
+
+    def _merge_multipart_components(self, members: List[Component]) -> Component:
+        ordered = sorted(
+            members,
+            key=lambda c: (
+                str(getattr(c, "package_refdes", "") or c.refdes or ""),
+                str(getattr(c, "unit_name", "") or ""),
+                c.refdes or "",
+                c.kind or "",
+            ),
+        )
+        first = ordered[0]
+        merged_pin_map: Dict[tuple[int | None, str], ComponentPin] = {}
+        family_pin_defs = list(getattr(first, "family_pin_defs", []) or [])
+        for base_pin in family_pin_defs:
+            key = (getattr(base_pin, "pin_number", None), base_pin.name)
+            merged_pin_map[key] = ComponentPin(name=base_pin.name, net="OPEN", pin_number=getattr(base_pin, "pin_number", None))
+        for comp in ordered:
+            unit = str(getattr(comp, "unit_name", "") or "").strip()
+            for pin in comp.pins:
+                pin_name = f"{unit}.{pin.name}" if unit and not str(pin.name).startswith(f"{unit}.") else pin.name
+                key = (getattr(pin, "pin_number", None), pin_name)
+                merged_pin_map[key] = ComponentPin(name=pin_name, net=pin.net, pin_number=getattr(pin, "pin_number", None))
+        merged_pins = list(merged_pin_map.values())
+        merged_pins.sort(key=lambda p: (p.pin_number is None, p.pin_number if p.pin_number is not None else 10**9, p.name))
+        merged_value = next((str(c.value or "").strip() for c in ordered if str(c.value or "").strip()), "")
+        merged_kind = (
+            str(getattr(first, "display_name", "") or "").strip()
+            or str(getattr(first, "multipart_family", "") or "").strip()
+            or first.kind
+        )
+        return Component(
+            refdes=str(getattr(first, "package_refdes", "") or first.refdes or "").strip(),
+            kind=merged_kind,
+            value=merged_value,
+            pins=merged_pins,
+            spice_type=first.spice_type,
+            display_name=str(getattr(first, "display_name", "") or merged_kind).strip(),
+            multipart_family=str(getattr(first, "multipart_family", "") or "").strip(),
+            unit_name="",
+            package_refdes=str(getattr(first, "package_refdes", "") or first.refdes or "").strip(),
+            family_pin_defs=family_pin_defs,
+        )
 
     @staticmethod
     def _default_component_type(component: Component) -> str:
@@ -349,7 +468,9 @@ class NetlistBuilder:
                 if n.get("connections")
             ]
             port_to_node: Dict[Tuple[str, str], str] = {}
-            for net in nets:
+            for raw_net, net in zip(nets_meta, nets):
+                if not _net_is_assigned(raw_net):
+                    continue
                 for connection in net.connections:
                     refdes = connection.component_refdes or connection.component_kind
                     port_to_node[(refdes, connection.port_name)] = net.name
@@ -358,17 +479,29 @@ class NetlistBuilder:
             for c in components:
                 if _is_net_component(c.kind) or _is_chip_component(c.kind):
                     continue
-                refdes = c.refdes or c.kind
+                refdes = _component_display_refdes(c)
                 pins: List[ComponentPin] = []
                 ports = [p for p in getattr(c, "ports", []) if p is not None] or [
                     p for p in (getattr(c, "port_left", None), getattr(c, "port_right", None)) if p is not None
                 ]
                 for port in ports:
                     net_name = port_to_node.get((refdes, port.name), "OPEN")
-                    pins.append(ComponentPin(name=port.name, net=net_name))
+                    pins.append(ComponentPin(name=port.name, net=net_name, pin_number=getattr(port, "pin_number", None)))
                 cdef = comp_defs.get(c.kind)
                 spice_type = cdef.spice_type if cdef else ""
-                component_models.append(Component(refdes=c.refdes, kind=c.kind, value=c.value, pins=pins, spice_type=spice_type))
+                component_models.append(Component(
+                    refdes=refdes,
+                    kind=c.kind,
+                    value=c.value,
+                    pins=pins,
+                    spice_type=spice_type,
+                    display_name=(cdef.display_name if cdef else c.kind),
+                    multipart_family=(c.multipart_family() if hasattr(c, "multipart_family") else ""),
+                    unit_name=(c.unit_name() if hasattr(c, "unit_name") else ""),
+                    package_refdes=str(getattr(c, "refdes", "") or refdes).strip(),
+                    pl_source_id=int(getattr(c, "_pl_source_id", -1)),
+                    family_pin_defs=_family_pin_catalog(c.kind, comp_defs),
+                ))
 
             used_by_prefix = self._collect_used_refdes_numbers(component_models, comp_defs)
             # Flatten hierarchical chip instances: include their internal components
@@ -405,7 +538,7 @@ class NetlistBuilder:
                 key = point_key(port.scenePos())
                 uf.add(key)
                 conn = NetConnection(
-                    component_refdes=comp.refdes,
+                    component_refdes=_component_display_refdes(comp),
                     component_kind=comp.kind,
                     port_name=port.name,
                 )
@@ -430,17 +563,29 @@ class NetlistBuilder:
 
         component_models: List[Component] = []
         for c in components:
-            refdes = c.refdes or c.kind
+            refdes = _component_display_refdes(c)
             pins: List[ComponentPin] = []
             ports = [p for p in getattr(c, "ports", []) if p is not None] or [
                 p for p in (getattr(c, "port_left", None), getattr(c, "port_right", None)) if p is not None
             ]
             for port in ports:
                 net_name = port_to_node.get((refdes, port.name), "OPEN")
-                pins.append(ComponentPin(name=port.name, net=net_name))
+                pins.append(ComponentPin(name=port.name, net=net_name, pin_number=getattr(port, "pin_number", None)))
             cdef = comp_defs.get(c.kind)
             spice_type = cdef.spice_type if cdef else ""
-            component_models.append(Component(refdes=c.refdes, kind=c.kind, value=c.value, pins=pins, spice_type=spice_type))
+            component_models.append(Component(
+                refdes=refdes,
+                kind=c.kind,
+                value=c.value,
+                pins=pins,
+                spice_type=spice_type,
+                display_name=(cdef.display_name if cdef else c.kind),
+                multipart_family=(c.multipart_family() if hasattr(c, "multipart_family") else ""),
+                unit_name=(c.unit_name() if hasattr(c, "unit_name") else ""),
+                package_refdes=str(getattr(c, "refdes", "") or refdes).strip(),
+                pl_source_id=int(getattr(c, "_pl_source_id", -1)),
+                family_pin_defs=_family_pin_catalog(c.kind, comp_defs),
+            ))
 
         return Netlist(components=component_models, nets=nets)
 
@@ -527,7 +672,7 @@ class NetlistBuilder:
             for p in ports_local:
                 raw = child_port_to_net.get((comp.refdes, p.name), "OPEN")
                 mapped = self._qualify_child_net(chip_ref, raw)
-                merged_pins.append(ComponentPin(name=p.name, net=mapped))
+                merged_pins.append(ComponentPin(name=p.name, net=mapped, pin_number=getattr(p, "pin_number", None)))
             expanded.append(
                 Component(
                     refdes=merged_ref,
@@ -535,6 +680,11 @@ class NetlistBuilder:
                     value=comp.value,
                     pins=merged_pins,
                     spice_type=(cdef.spice_type if cdef else ""),
+                    display_name=(cdef.display_name if cdef else comp.kind),
+                    multipart_family="",
+                    unit_name="",
+                    package_refdes=merged_ref,
+                    family_pin_defs=[],
                 )
             )
         return expanded

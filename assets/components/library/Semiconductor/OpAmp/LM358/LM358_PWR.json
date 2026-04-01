@@ -1,0 +1,32 @@
+{
+  "kind": "LM358_PWR",
+  "display_name": "LM358",
+  "category": "Semiconductor / OpAmp / LM358",
+  "prefix": "U",
+  "multipart_family": "LM358",
+  "unit_name": "PWR",
+  "shortcut": "",
+  "spice_type": "X",
+  "value_label": "Part Number",
+  "show_value": true,
+  "default_value": "LM358",
+  "type": "component",
+  "net_name": "",
+  "symbol": "custom/LM358_PWR.json",
+  "auto_align_terminals": false,
+  "auto_scale_symbol": false,
+  "ports": [
+    {
+      "name": "V-",
+      "pin_number": 4,
+      "x": -45.71428571428571,
+      "y": 0.0
+    },
+    {
+      "name": "V+",
+      "pin_number": 8,
+      "x": 45.71428571428571,
+      "y": 0.0
+    }
+  ]
+}

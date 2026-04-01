@@ -1,36 +1,68 @@
 {
   "components": [
     {
-      "kind": "Oscope",
+      "kind": "Oscilloscope",
       "pos": [
-        -1020.0,
-        -320.0
+        -1034.7169811320755,
+        -121.88679245283018
       ],
       "rotation": 90.0,
       "mirror": {
         "mx": 1.0,
         "my": 1.0
       },
-      "refdes": "O1",
-      "value": "Oscope",
+      "refdes": "O2",
+      "value": "Oscilloscope",
+      "pl_source_id": -1,
       "labels": {
         "refdes_pos": [
-          -11.875,
-          -64.00109865963525
+          -12.78125,
+          -64.28301886792453
         ],
         "value_pos": [
-          -67.43243936989626,
-          15.972666824094418
+          -66.6214291897507,
+          30.622527178173883
         ],
         "refdes_manual": false,
         "value_manual": true
-      }
+      },
+      "chip": {},
+      "chip_io": {}
     },
     {
-      "kind": "WaveGen",
+      "kind": "Oscilloscope",
       "pos": [
-        -1500.0,
-        -360.0
+        -1405.2830188679245,
+        -141.88679245283018
+      ],
+      "rotation": 270.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": -1.0
+      },
+      "refdes": "O1",
+      "value": "Oscilloscope",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -11.875,
+          -64.28301886792453
+        ],
+        "value_pos": [
+          -64.10913694598338,
+          -53.12054761406988
+        ],
+        "refdes_manual": false,
+        "value_manual": true
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "WaveGenerator",
+      "pos": [
+        -1438.1132075471698,
+        -425.2830188679245
       ],
       "rotation": 0.0,
       "mirror": {
@@ -38,45 +70,51 @@
         "my": 1.0
       },
       "refdes": "W1",
-      "value": "WaveGen",
+      "value": "WaveGenerator",
+      "pl_source_id": -1,
       "labels": {
         "refdes_pos": [
           -13.1484375,
-          -55.01406799531067
+          -64.28301886792453
         ],
         "value_pos": [
-          -32.34375,
-          41.01406799531067
+          -96.22275363573408,
+          30.622527178173826
         ],
         "refdes_manual": false,
-        "value_manual": false
-      }
+        "value_manual": true
+      },
+      "chip": {},
+      "chip_io": {}
     },
     {
-      "kind": "Resistor",
+      "kind": "Ground",
       "pos": [
         -1200.0,
-        -300.0
+        120.0
       ],
-      "rotation": 90.0,
+      "rotation": 0.0,
       "mirror": {
         "mx": 1.0,
         "my": 1.0
       },
-      "refdes": "R1",
-      "value": "10k",
+      "refdes": "GND",
+      "value": "GND",
+      "pl_source_id": -1,
       "labels": {
         "refdes_pos": [
-          -11.1015625,
-          -38.0
+          -18.15625,
+          -43.625
         ],
         "value_pos": [
-          12.6171875,
-          -33.0
+          56.0,
+          -12.0
         ],
         "refdes_manual": false,
-        "value_manual": true
-      }
+        "value_manual": false
+      },
+      "chip": {},
+      "chip_io": {}
     },
     {
       "kind": "Resistor",
@@ -91,6 +129,7 @@
       },
       "refdes": "R2",
       "value": "2.2k",
+      "pl_source_id": -1,
       "labels": {
         "refdes_pos": [
           -12.0078125,
@@ -102,118 +141,51 @@
         ],
         "refdes_manual": false,
         "value_manual": true
-      }
-    },
-    {
-      "kind": "Ground",
-      "pos": [
-        -1300.0,
-        60.0
-      ],
-      "rotation": 0.0,
-      "mirror": {
-        "mx": 1.0,
-        "my": 1.0
       },
-      "refdes": "GND",
-      "value": "GND",
-      "labels": {
-        "refdes_pos": [
-          -18.15625,
-          -43.625
-        ],
-        "value_pos": [
-          56.0,
-          -12.0
-        ],
-        "refdes_manual": false,
-        "value_manual": false
-      }
+      "chip": {},
+      "chip_io": {}
     },
     {
-      "kind": "Oscope",
+      "kind": "Resistor",
       "pos": [
-        -1020.0,
-        -120.0
+        -1200.0,
+        -300.0
       ],
       "rotation": 90.0,
       "mirror": {
         "mx": 1.0,
         "my": 1.0
       },
-      "refdes": "O2",
-      "value": "Oscope",
+      "refdes": "R1",
+      "value": "10k",
+      "pl_source_id": -1,
       "labels": {
         "refdes_pos": [
-          -11.78125,
-          -12.001098659635247
+          -11.1015625,
+          -38.0
         ],
         "value_pos": [
-          -68.0546875,
-          14.606689006079264
+          12.6171875,
+          -33.0
         ],
-        "refdes_manual": true,
+        "refdes_manual": false,
         "value_manual": true
-      }
+      },
+      "chip": {},
+      "chip_io": {}
     }
   ],
-  "texts": [
-    {
-      "text": "This particular circuit\nhas many applications\nbut one you can see in\nyour house is a light\ndimmer! A light bulb is\nconnected to R2 and \nwith a knob you change\nthe resistance. More\nVoltage = More light!",
-      "pos": [
-        -879.6418715499053,
-        -144.28527624440235
-      ],
-      "style": {
-        "family": ".AppleSystemUIFont",
-        "point_size": 13,
-        "bold": false,
-        "italic": false,
-        "color": "#ebebeb",
-        "custom_color": ""
-      }
-    },
-    {
-      "text": "Who gets more voltage?\nWell thats easy, which\nresistor is bigger?\nThere you have it, the\nbiggest resistor is the one\nthat will have more voltage!",
-      "pos": [
-        -1413.676335310771,
-        -247.35267062154261
-      ],
-      "style": {
-        "family": ".AppleSystemUIFont",
-        "point_size": 13,
-        "bold": false,
-        "italic": false,
-        "color": "#ebebeb",
-        "custom_color": ""
-      }
-    },
-    {
-      "text": "This is a Voltage divider. As it name implies it divides the total voltage between the two resistors!",
-      "pos": [
-        -1477.7077327824536,
-        -478.6974918751647
-      ],
-      "style": {
-        "family": ".AppleSystemUIFont",
-        "point_size": 13,
-        "bold": false,
-        "italic": false,
-        "color": "#ebebeb",
-        "custom_color": ""
-      }
-    }
-  ],
+  "texts": [],
   "wires": [
     {
       "points": [
         {
-          "x": -1060.0,
-          "y": -300.0
+          "x": -1100.0,
+          "y": -100.0
         },
         {
           "x": -1100.0,
-          "y": -300.0
+          "y": -20.0
         }
       ],
       "mode": "orth",
@@ -222,20 +194,12 @@
         "-"
       ],
       "b_point": {
-        "x": -1100.0,
-        "y": -200.0
+        "x": -1200.0,
+        "y": -20.0
       }
     },
     {
       "points": [
-        {
-          "x": -1060.0,
-          "y": -139.9926756024317
-        },
-        {
-          "x": -1060.0,
-          "y": -140.0
-        },
         {
           "x": -1100.0,
           "y": -140.0
@@ -247,7 +211,7 @@
       ],
       "mode": "orth",
       "a": [
-        5,
+        0,
         "+"
       ],
       "b_point": {
@@ -258,87 +222,29 @@
     {
       "points": [
         {
-          "x": -1060.0,
-          "y": -340.0
+          "x": -1340.0,
+          "y": -120.0
         },
         {
-          "x": -1060.0,
-          "y": -360.0
-        },
-        {
-          "x": -1200.0,
-          "y": -360.0
+          "x": -1340.0,
+          "y": 20.0
         }
       ],
       "mode": "orth",
       "a": [
-        0,
-        "+"
-      ],
-      "b": [
-        2,
-        "A"
-      ]
-    },
-    {
-      "points": [
-        {
-          "x": -1200.0,
-          "y": -80.0
-        }
-      ],
-      "mode": "orth",
-      "a": [
-        3,
-        "B"
+        1,
+        "-"
       ],
       "b_point": {
         "x": -1200.0,
-        "y": 40.0
+        "y": 20.0
       }
     },
     {
       "points": [
         {
-          "x": -1060.0,
-          "y": -100.0073243975683
-        },
-        {
-          "x": -1060.0,
-          "y": -100.0
-        },
-        {
-          "x": -1060.0,
-          "y": 40.0
-        },
-        {
-          "x": -1200.0,
-          "y": 40.0
-        }
-      ],
-      "mode": "orth",
-      "a": [
-        5,
-        "-"
-      ],
-      "b": [
-        4,
-        "A"
-      ]
-    },
-    {
-      "points": [
-        {
-          "x": -1460.0,
-          "y": -360.0
-        },
-        {
-          "x": -1320.0,
-          "y": -360.0
-        },
-        {
-          "x": -1200.0,
-          "y": -360.0
+          "x": -1340.0,
+          "y": -160.0
         }
       ],
       "mode": "orth",
@@ -346,8 +252,54 @@
         1,
         "+"
       ],
+      "b_point": {
+        "x": -1340.0,
+        "y": -360.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1200.0,
+          "y": -20.0
+        },
+        {
+          "x": -1200.0,
+          "y": 20.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        4,
+        "B"
+      ],
       "b": [
+        3,
+        "A"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -1420.0,
+          "y": -360.0
+        },
+        {
+          "x": -1340.0,
+          "y": -360.0
+        },
+        {
+          "x": -1200.0,
+          "y": -360.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
         2,
+        "+"
+      ],
+      "b": [
+        5,
         "A"
       ]
     },
@@ -372,11 +324,11 @@
       ],
       "mode": "orth",
       "a": [
-        3,
+        4,
         "A"
       ],
       "b": [
-        2,
+        5,
         "B"
       ]
     }
@@ -388,8 +340,24 @@
     "snap_on": true,
     "wire_junctions": [
       {
+        "x": -1340.0,
+        "y": -360.0
+      },
+      {
+        "x": -1200.0,
+        "y": -350.0
+      },
+      {
         "x": -1200.0,
         "y": -200.0
+      },
+      {
+        "x": -1200.0,
+        "y": -20.0
+      },
+      {
+        "x": -1200.0,
+        "y": 20.0
       },
       {
         "x": -1200.0,
@@ -398,6 +366,18 @@
       {
         "x": -1100.0,
         "y": -200.0
+      },
+      {
+        "x": -1020.0,
+        "y": -270.0
+      },
+      {
+        "x": -1020.0,
+        "y": -70.0
+      },
+      {
+        "x": -1000.0,
+        "y": -60.0
       }
     ],
     "net_names": []
