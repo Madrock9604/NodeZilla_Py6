@@ -83,7 +83,7 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("NodeZilla")
-    app.setApplicationDisplayName("NodeZilla (Beta) V1.0.4")
+    app.setApplicationDisplayName("NodeZilla (Beta) V1.0.5")
     app.setOrganizationName("NodeZilla")
     ensure_user_workspace()
     icon = _resolve_app_icon()
