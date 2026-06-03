@@ -1,0 +1,39 @@
+{
+  "kind": "CMA-4544PF-W",
+  "display_name": "CMA-4544PF-W",
+  "category": "Sensors",
+  "prefix": "MIC",
+  "multipart_family": "",
+  "unit_name": "",
+  "spice_type": "u",
+  "value_label": "Part Number",
+  "show_value": true,
+  "default_value": "CMA-4544PF-W",
+  "type": "component",
+  "net_name": "",
+  "symbol": "custom/CMA-4544PF-W.json",
+  "auto_align_terminals": false,
+  "auto_scale_symbol": false,
+  "refdes_pos": [
+    -20.0,
+    -80.0
+  ],
+  "value_pos": [
+    -60.0,
+    60.0
+  ],
+  "ports": [
+    {
+      "name": "P1",
+      "pin_number": null,
+      "x": -60.0,
+      "y": -40.0
+    },
+    {
+      "name": "P2",
+      "pin_number": null,
+      "x": -60.0,
+      "y": 40.0
+    }
+  ]
+}

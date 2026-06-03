@@ -5,14 +5,15 @@ from pathlib import Path
 import json
 from typing import List, Tuple, Optional
 
-from PySide6.QtCore import Qt, QPointF, QRectF, QSize, QLineF, QEvent
-from PySide6.QtGui import QPen, QPainterPath, QPainter, QAction, QColor, QFont, QBrush
+from PySide6.QtCore import Qt, QPointF, QRectF, QSize, QLineF, QEvent, QSettings
+from PySide6.QtGui import QPen, QPainterPath, QPainter, QAction, QColor, QFont, QBrush, QTransform
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QPushButton,
     QTableWidget, QTableWidgetItem, QGraphicsView, QGraphicsScene, QLabel, QWidget,
     QMessageBox, QSpinBox, QCheckBox, QGraphicsLineItem, QGraphicsRectItem,
     QGraphicsEllipseItem, QGraphicsPathItem, QGraphicsTextItem, QGraphicsItem,
-    QComboBox, QFileDialog, QApplication, QToolButton, QFrame, QGroupBox
+    QComboBox, QFileDialog, QApplication, QToolButton, QFrame, QGroupBox,
+    QSplitter, QSizePolicy
 )
 
 from .component_library import load_component_library, find_component_file
@@ -36,6 +37,40 @@ class _PinData:
     x: float
     y: float
     pin_number: int | None = None
+
+
+class _TextPropertiesDialog(QDialog):
+    def __init__(self, text: str, font_size: int, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Text Properties")
+        self.resize(560, 260)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(10)
+
+        form = QFormLayout()
+        self.text_edit = QGraphicsTextItem  # type: ignore[assignment]
+        from PySide6.QtWidgets import QTextEdit, QDialogButtonBox
+        self.text_edit = QTextEdit()
+        self.text_edit.setPlainText(text)
+        self.text_edit.setMinimumHeight(120)
+        self.font_size_spin = QSpinBox()
+        self.font_size_spin.setRange(6, 96)
+        self.font_size_spin.setValue(max(6, int(font_size or 12)))
+        form.addRow("Text:", self.text_edit)
+        form.addRow("Text size:", self.font_size_spin)
+        root.addLayout(form)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+    def text_value(self) -> str:
+        try:
+            return self.text_edit.toPlainText().strip()
+        except Exception:
+            return ""
 
 
 class _GridView(QGraphicsView):
@@ -155,6 +190,37 @@ class _SnapPath(QGraphicsPathItem):
         return super().itemChange(change, value)
 
 
+class _ArcPathItem(_SnapPath):
+    def __init__(self, start: QPointF, end: QPointF, control: QPointF, snap_fn):
+        self.start_point = QPointF(start)
+        self.end_point = QPointF(end)
+        self.control_point = QPointF(control)
+        super().__init__(QPainterPath(), snap_fn)
+        self.setData(2, "arc")
+        self.rebuild_path()
+
+    def rebuild_path(self):
+        path = QPainterPath(self.start_point)
+        path.quadTo(self.control_point, self.end_point)
+        self.setPath(path)
+
+
+class _BezierPathItem(_SnapPath):
+    def __init__(self, start: QPointF, control1: QPointF, control2: QPointF, end: QPointF, snap_fn):
+        self.start_point = QPointF(start)
+        self.control1_point = QPointF(control1)
+        self.control2_point = QPointF(control2)
+        self.end_point = QPointF(end)
+        super().__init__(QPainterPath(), snap_fn)
+        self.setData(2, "bezier")
+        self.rebuild_path()
+
+    def rebuild_path(self):
+        path = QPainterPath(self.start_point)
+        path.cubicTo(self.control1_point, self.control2_point, self.end_point)
+        self.setPath(path)
+
+
 class _SnapText(QGraphicsTextItem):
     def __init__(self, text: str, snap_fn):
         super().__init__(text)
@@ -168,6 +234,91 @@ class _SnapText(QGraphicsTextItem):
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionChange and self._snap_fn:
             return self._snap_fn(value)
+        return super().itemChange(change, value)
+
+
+class _MetaLabelItem(QGraphicsTextItem):
+    """Movable designator/value placeholder that is not exported as symbol art."""
+
+    def __init__(self, text: str, label_kind: str, snap_fn):
+        super().__init__(text)
+        self.label_kind = label_kind  # refdes | value
+        self._snap_fn = snap_fn
+        self._manual_pos = False
+        self._setting_default = False
+        self.setData(0, "meta_label")
+        self.setTextInteractionFlags(Qt.NoTextInteraction)
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+        self.setZValue(40)
+        self.setOpacity(0.9)
+
+    def set_default_pos(self, pos: QPointF):
+        self._setting_default = True
+        self.setPos(pos)
+        self._setting_default = False
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionChange and self._snap_fn:
+            return self._snap_fn(value)
+        if change == QGraphicsItem.ItemPositionHasChanged and not self._setting_default:
+            self._manual_pos = True
+        return super().itemChange(change, value)
+
+
+class _EditHandle(QGraphicsRectItem):
+    def __init__(self, role: str, snap_fn, moved_cb, circular: bool = False):
+        super().__init__(-4, -4, 8, 8)
+        self.role = role
+        self._snap_fn = snap_fn
+        self._moved_cb = moved_cb
+        self._internal_move = False
+        self._last_scene_pos = QPointF()
+        self._circular = circular
+        self.setData(0, "edit_handle")
+        if circular:
+            self.setBrush(QBrush(QColor(255, 196, 64)))
+            self.setPen(QPen(Qt.white, 1))
+        else:
+            self.setBrush(QBrush(Qt.black))
+            self.setPen(QPen(Qt.white, 1))
+        self.setZValue(120)
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, False)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+
+    def shape(self):
+        path = QPainterPath()
+        if self._circular:
+            path.addEllipse(self.rect())
+        else:
+            path.addRect(self.rect())
+        return path
+
+    def paint(self, painter, option, widget=None):
+        painter.setPen(self.pen())
+        painter.setBrush(self.brush())
+        if self._circular:
+            painter.drawEllipse(self.rect())
+        else:
+            painter.drawRect(self.rect())
+
+    def set_handle_pos(self, pos: QPointF):
+        self._internal_move = True
+        self.setPos(pos)
+        self._last_scene_pos = QPointF(pos)
+        self._internal_move = False
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionChange and self._snap_fn:
+            return self._snap_fn(value)
+        if change == QGraphicsItem.ItemPositionHasChanged and not self._internal_move:
+            new_pos = self.pos()
+            old_pos = QPointF(self._last_scene_pos)
+            self._last_scene_pos = QPointF(new_pos)
+            if self._moved_cb is not None:
+                self._moved_cb(self, old_pos, new_pos)
         return super().itemChange(change, value)
 
 
@@ -204,16 +355,28 @@ class _PinItem(QGraphicsEllipseItem):
 
 class CustomComponentDialog(QDialog):
     """Interactive symbol/pin editor for creating custom components."""
+    _SETTINGS_GROUP = "CustomComponentDialog"
+    _GUIDE_VISIBLE_KEY = "symbol_frame_visible"
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Create Custom Component")
-        self.resize(900, 600)
+        self.resize(1240, 780)
 
-        self._tool = "select"  # select | line | rect | ellipse | arc | semicircle | poly | pin | text
+        self._tool = "select"  # select | line | rect | ellipse | arc | bezier | pin | text
         self._start: Optional[QPointF] = None
         self._active_item = None
         self._poly_points: List[QPointF] = []
         self._poly_item = None
+        self._curve_points: List[QPointF] = []
+        self._text_pending: Optional[dict] = None
+        self._text_preview_item: Optional[_SnapText] = None
+        self._pin_preview_item: Optional[QGraphicsEllipseItem] = None
+        self._pin_preview_label: Optional[QGraphicsTextItem] = None
+        self._meta_refdes_item: Optional[_MetaLabelItem] = None
+        self._meta_value_item: Optional[_MetaLabelItem] = None
+        self._edit_handles: List[_EditHandle] = []
+        self._handle_target = None
         self._pin_items: List[_PinItem] = []
         self._copy_buffer: List[dict] = []
         self._pin_prefix = "P"
@@ -229,12 +392,16 @@ class CustomComponentDialog(QDialog):
         self._arc_start_deg = 0
         self._arc_span_deg = 180
 
-        root = QHBoxLayout(self)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(8)
 
         left = QVBoxLayout()
         self.view = _GridView()
         self.scene = QGraphicsScene()
         self.view.setScene(self.scene)
+        self.view.setMouseTracking(True)
+        self.view.viewport().setMouseTracking(True)
         self.scene.setSceneRect(
             -EDITOR_SCENE_WIDTH / 2,
             -EDITOR_SCENE_HEIGHT / 2,
@@ -248,17 +415,17 @@ class CustomComponentDialog(QDialog):
             QPen(Qt.darkGray, 1, Qt.DotLine)
         )
         self._guide_rect.setData(0, "guide")
+        self._guide_rect.setOpacity(0.45)
 
         tools_box = QGroupBox("Tools")
-        tools = QHBoxLayout(tools_box)
+        tools = QVBoxLayout(tools_box)
         tools.setSpacing(6)
         self.select_btn = self._make_tool_btn("Select")
         self.line_btn = self._make_tool_btn("Line")
         self.rect_btn = self._make_tool_btn("Rect")
         self.ellipse_btn = self._make_tool_btn("Ellipse")
         self.arc_tool_btn = self._make_tool_btn("Arc")
-        self.arc_btn = self._make_tool_btn("Semicircle")
-        self.poly_btn = self._make_tool_btn("Polyline")
+        self.bezier_btn = self._make_tool_btn("Bezier")
         self.pin_btn = self._make_tool_btn("Pin")
         self.text_btn = self._make_tool_btn("Text")
         for btn in (
@@ -267,13 +434,13 @@ class CustomComponentDialog(QDialog):
             self.rect_btn,
             self.ellipse_btn,
             self.arc_tool_btn,
-            self.arc_btn,
-            self.poly_btn,
+            self.bezier_btn,
             self.pin_btn,
             self.text_btn,
         ):
             tools.addWidget(btn)
         tools.addStretch(1)
+        tools_box.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
 
         modifiers_box = QGroupBox("Edit")
         modifiers = QHBoxLayout(modifiers_box)
@@ -303,6 +470,12 @@ class CustomComponentDialog(QDialog):
         self.snap_chk.setChecked(True)
         self.grid_chk = QCheckBox("Grid")
         self.grid_chk.setChecked(True)
+        self.guide_chk = QCheckBox("Symbol Frame")
+        self.guide_chk.setToolTip(
+            "Show or hide the recommended symbol frame used as a visual sizing guide.\n"
+            "Symbols are centered against this frame, but are only scaled down if they exceed it."
+        )
+        self.guide_chk.setChecked(self._load_guide_visible_setting())
         self.grid_spin = QSpinBox()
         self.grid_spin.setRange(2, 50)
         self.grid_spin.setValue(10)
@@ -313,6 +486,7 @@ class CustomComponentDialog(QDialog):
         self.pin_edge_tol_spin.setValue(8)
         snap_row.addWidget(self.snap_chk)
         snap_row.addWidget(self.grid_chk)
+        snap_row.addWidget(self.guide_chk)
         snap_row.addWidget(QLabel("Grid:"))
         snap_row.addWidget(self.grid_spin)
         snap_row.addWidget(self.pin_edge_chk)
@@ -321,32 +495,10 @@ class CustomComponentDialog(QDialog):
         self.zoom_out_btn = QPushButton("Zoom -")
         self.zoom_in_btn = QPushButton("Zoom +")
         self.fit_btn = QPushButton("Fit")
-        snap_row.addWidget(self.zoom_out_btn)
-        snap_row.addWidget(self.zoom_in_btn)
-        snap_row.addWidget(self.fit_btn)
-        snap_row.addStretch(1)
-
-        self.status_label = QLabel("Select a tool, draw on the canvas, and edit pins on the right.")
-        self.status_label.setObjectName("componentEditorStatus")
-        self.status_label.setWordWrap(True)
-        status_frame = QFrame()
-        status_layout = QHBoxLayout(status_frame)
-        status_layout.setContentsMargins(8, 6, 8, 6)
-        status_layout.addWidget(self.status_label)
-
-        left.addWidget(tools_box)
-        left.addWidget(modifiers_box)
-        left.addWidget(view_box)
-        left.addWidget(status_frame)
-        left.addWidget(self.view, 1)
-
-        right = QVBoxLayout()
-        style_box = QGroupBox("Style")
-        style_form = QFormLayout(style_box)
         self.stroke_spin = QSpinBox()
         self.stroke_spin.setRange(1, 8)
         self.stroke_spin.setValue(self._stroke_width)
-        self.fill_chk = QCheckBox("Fill closed shapes")
+        self.fill_chk = QCheckBox("Fill")
         self.fill_chk.setChecked(self._fill_enabled)
         self.font_size_spin = QSpinBox()
         self.font_size_spin.setRange(6, 48)
@@ -357,18 +509,51 @@ class CustomComponentDialog(QDialog):
         self.arc_span_spin = QSpinBox()
         self.arc_span_spin.setRange(-360, 360)
         self.arc_span_spin.setValue(self._arc_span_deg)
-        self.default_text_edit = QLineEdit(self._default_text)
-        self.apply_style_btn = QPushButton("Apply to Selection")
-        style_form.addRow("Stroke", self.stroke_spin)
-        style_form.addRow("", self.fill_chk)
-        style_form.addRow("Text Size", self.font_size_spin)
-        style_form.addRow("Arc Start", self.arc_start_spin)
-        style_form.addRow("Arc Span", self.arc_span_spin)
-        style_form.addRow("New Text", self.default_text_edit)
-        style_form.addRow("", self.apply_style_btn)
-        right.addWidget(style_box)
+        self.apply_style_btn = QPushButton("Apply Style")
+        snap_row.addWidget(self.zoom_out_btn)
+        snap_row.addWidget(self.zoom_in_btn)
+        snap_row.addWidget(self.fit_btn)
+        snap_row.addSpacing(8)
+        snap_row.addWidget(QLabel("Stroke"))
+        snap_row.addWidget(self.stroke_spin)
+        snap_row.addWidget(self.fill_chk)
+        snap_row.addWidget(QLabel("Text"))
+        snap_row.addWidget(self.font_size_spin)
+        snap_row.addWidget(QLabel("Arc"))
+        snap_row.addWidget(self.arc_start_spin)
+        snap_row.addWidget(QLabel("Span"))
+        snap_row.addWidget(self.arc_span_spin)
+        snap_row.addWidget(self.apply_style_btn)
+        snap_row.addStretch(1)
+
+        self.status_label = QLabel("Select a tool, draw on the canvas, and edit pins on the right.")
+        self.status_label.setObjectName("componentEditorStatus")
+        self.status_label.setWordWrap(True)
+        status_frame = QFrame()
+        status_layout = QHBoxLayout(status_frame)
+        status_layout.setContentsMargins(8, 6, 8, 6)
+        status_layout.addWidget(self.status_label)
+
+        left.addWidget(modifiers_box)
+        left.addWidget(view_box)
+        left.addWidget(status_frame)
+        editor_workspace = QHBoxLayout()
+        editor_workspace.setSpacing(8)
+        editor_workspace.addWidget(tools_box, 0)
+        canvas_frame = QFrame()
+        canvas_frame.setFrameShape(QFrame.StyledPanel)
+        canvas_layout = QVBoxLayout(canvas_frame)
+        canvas_layout.setContentsMargins(0, 0, 0, 0)
+        canvas_layout.addWidget(self.view, 1)
+        editor_workspace.addWidget(canvas_frame, 1)
+        left.addLayout(editor_workspace, 1)
+
+        right = QVBoxLayout()
 
         form = QFormLayout()
+        form.setContentsMargins(8, 8, 8, 8)
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(10)
         self.kind_edit = QLineEdit()
         self.display_edit = QLineEdit()
         self.prefix_edit = QLineEdit()
@@ -438,8 +623,19 @@ class CustomComponentDialog(QDialog):
         buttons.addWidget(self.save_btn)
         right.addLayout(buttons)
 
-        root.addLayout(left, 3)
-        root.addLayout(right, 2)
+        left_panel = QWidget()
+        left_panel.setLayout(left)
+        right_panel = QWidget()
+        right_panel.setLayout(right)
+        right_panel.setMinimumWidth(400)
+
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.addWidget(left_panel)
+        splitter.addWidget(right_panel)
+        splitter.setStretchFactor(0, 5)
+        splitter.setStretchFactor(1, 3)
+        splitter.setChildrenCollapsible(False)
+        root.addWidget(splitter, 1)
 
         # wiring
         self.select_btn.clicked.connect(lambda: self._set_tool("select"))
@@ -447,8 +643,7 @@ class CustomComponentDialog(QDialog):
         self.rect_btn.clicked.connect(lambda: self._set_tool("rect"))
         self.ellipse_btn.clicked.connect(lambda: self._set_tool("ellipse"))
         self.arc_tool_btn.clicked.connect(lambda: self._set_tool("arc"))
-        self.arc_btn.clicked.connect(lambda: self._set_tool("semicircle"))
-        self.poly_btn.clicked.connect(lambda: self._set_tool("poly"))
+        self.bezier_btn.clicked.connect(lambda: self._set_tool("bezier"))
         self.pin_btn.clicked.connect(lambda: self._set_tool("pin"))
         self.text_btn.clicked.connect(lambda: self._set_tool("text"))
 
@@ -466,6 +661,7 @@ class CustomComponentDialog(QDialog):
 
         self.snap_chk.toggled.connect(self._sync_snap)
         self.grid_chk.toggled.connect(self._sync_snap)
+        self.guide_chk.toggled.connect(self._sync_guide)
         self.grid_spin.valueChanged.connect(self._sync_snap)
         self.pin_edge_chk.toggled.connect(self._sync_pin_snap)
         self.pin_edge_tol_spin.valueChanged.connect(self._sync_pin_snap)
@@ -474,7 +670,6 @@ class CustomComponentDialog(QDialog):
         self.font_size_spin.valueChanged.connect(self._sync_style_defaults)
         self.arc_start_spin.valueChanged.connect(self._sync_style_defaults)
         self.arc_span_spin.valueChanged.connect(self._sync_style_defaults)
-        self.default_text_edit.textChanged.connect(self._sync_style_defaults)
         self.apply_style_btn.clicked.connect(self._apply_style_to_selection)
         self.zoom_in_btn.clicked.connect(lambda: self.view.scale(1.2, 1.2))
         self.zoom_out_btn.clicked.connect(lambda: self.view.scale(1 / 1.2, 1 / 1.2))
@@ -486,13 +681,19 @@ class CustomComponentDialog(QDialog):
         self.type_combo.currentTextChanged.connect(self._sync_type_fields)
         self.pin_prefix_edit.textChanged.connect(self._sync_pin_defaults)
         self.pin_index_spin.valueChanged.connect(self._sync_pin_defaults)
+        self.kind_edit.textChanged.connect(self._update_meta_labels_from_fields)
+        self.display_edit.textChanged.connect(self._update_meta_labels_from_fields)
+        self.prefix_edit.textChanged.connect(self._update_meta_labels_from_fields)
+        self.scene.selectionChanged.connect(self._refresh_edit_handles)
 
         self._set_tool("select")
         self._sync_snap()
+        self._sync_guide()
         self._sync_pin_defaults()
         self._sync_pin_snap()
         self._sync_style_defaults()
         self._sync_type_fields()
+        self._ensure_meta_labels()
         self.view.viewport().installEventFilter(self)
         self._editing_kind: str | None = None
         self._editing_path: Path | None = None
@@ -514,8 +715,7 @@ class CustomComponentDialog(QDialog):
             "rect": self.rect_btn,
             "ellipse": self.ellipse_btn,
             "arc": self.arc_tool_btn,
-            "semicircle": self.arc_btn,
-            "poly": self.poly_btn,
+            "bezier": self.bezier_btn,
             "pin": self.pin_btn,
             "text": self.text_btn,
         }
@@ -528,13 +728,47 @@ class CustomComponentDialog(QDialog):
         self._stroke_width = int(self.stroke_spin.value())
         self._fill_enabled = self.fill_chk.isChecked()
         self._font_size = int(self.font_size_spin.value())
-        self._default_text = self.default_text_edit.text().strip() or "Label"
         self._arc_start_deg = int(self.arc_start_spin.value())
         self._arc_span_deg = int(self.arc_span_spin.value())
+        self._update_meta_labels_from_fields()
+
+    def _sync_guide(self):
+        if getattr(self, "_guide_rect", None) is not None:
+            visible = self.guide_chk.isChecked()
+            self._guide_rect.setVisible(visible)
+            self._save_guide_visible_setting(visible)
+
+    def _load_guide_visible_setting(self) -> bool:
+        try:
+            settings = QSettings()
+            settings.beginGroup(self._SETTINGS_GROUP)
+            raw = settings.value(self._GUIDE_VISIBLE_KEY, True)
+            settings.endGroup()
+            if isinstance(raw, bool):
+                return raw
+            return str(raw).strip().lower() not in {"0", "false", "no", "off"}
+        except Exception:
+            return True
+
+    def _save_guide_visible_setting(self, visible: bool):
+        try:
+            settings = QSettings()
+            settings.beginGroup(self._SETTINGS_GROUP)
+            settings.setValue(self._GUIDE_VISIBLE_KEY, bool(visible))
+            settings.endGroup()
+        except Exception:
+            pass
 
     def _current_symbol_pen(self) -> QPen:
         pen = QPen(self._symbol_pen_color, float(self._stroke_width))
         pen.setCosmetic(True)
+        return pen
+
+    def _current_preview_pen(self) -> QPen:
+        preview = QColor(77, 200, 255)
+        pen = QPen(preview, float(self._stroke_width))
+        pen.setCosmetic(True)
+        pen.setStyle(Qt.DashLine)
         return pen
 
     def _current_symbol_brush(self) -> QBrush:
@@ -544,9 +778,41 @@ class CustomComponentDialog(QDialog):
         fill.setAlpha(36)
         return QBrush(fill)
 
+    def _current_preview_brush(self) -> QBrush:
+        if not self._fill_enabled:
+            return QBrush(Qt.NoBrush)
+        fill = QColor(77, 200, 255)
+        fill.setAlpha(28)
+        return QBrush(fill)
+
+    def _apply_preview_style_to_item(self, item):
+        if item is self._guide_rect or item.data(0) == "pin":
+            return
+        item.setData(1, "preview")
+        if isinstance(item, (QGraphicsLineItem, QGraphicsRectItem, QGraphicsEllipseItem, QGraphicsPathItem)):
+            item.setPen(self._current_preview_pen())
+            if hasattr(item, "setBrush"):
+                item.setBrush(self._current_preview_brush())
+        elif isinstance(item, QGraphicsTextItem):
+            font = item.font()
+            font.setPointSize(self._font_size)
+            item.setFont(font)
+            preview = QColor(77, 200, 255)
+            item.setDefaultTextColor(preview)
+            item.setOpacity(0.75)
+
+    def _finalize_preview_item(self, item):
+        if item is None:
+            return
+        item.setData(1, None)
+        if isinstance(item, QGraphicsTextItem):
+            item.setOpacity(1.0)
+        self._apply_style_to_item(item)
+        self._apply_item_theme(item)
+
     def _restack_selected(self, front: bool = True):
         for item in self.scene.selectedItems():
-            if item is self._guide_rect:
+            if item is self._guide_rect or item.data(0) == "meta_label":
                 continue
             item.setZValue(10 if front else 0)
 
@@ -656,6 +922,45 @@ class CustomComponentDialog(QDialog):
         is_net = self.type_combo.currentText().lower().startswith("net")
         self.net_name_edit.setEnabled(is_net)
 
+    def _meta_label_default_pos(self, label_kind: str, item: Optional[QGraphicsTextItem] = None) -> QPointF:
+        target = item
+        if target is None:
+            target = self._meta_refdes_item if label_kind == "refdes" else self._meta_value_item
+        br = self._guide_rect.rect()
+        width = target.boundingRect().width() if target is not None else 0.0
+        height = target.boundingRect().height() if target is not None else 0.0
+        if label_kind == "refdes":
+            return QPointF(-width / 2.0, br.top() - height - 6.0)
+        return QPointF(-width / 2.0, br.bottom() + 6.0)
+
+    def _ensure_meta_labels(self):
+        if self._meta_refdes_item is None or self._meta_refdes_item.scene() is None:
+            self._meta_refdes_item = _MetaLabelItem("X?", "refdes", self.view.snap_point)
+            self.scene.addItem(self._meta_refdes_item)
+        if self._meta_value_item is None or self._meta_value_item.scene() is None:
+            self._meta_value_item = _MetaLabelItem("Component", "value", self.view.snap_point)
+            self.scene.addItem(self._meta_value_item)
+        self._apply_item_theme(self._meta_refdes_item)
+        self._apply_item_theme(self._meta_value_item)
+        self._update_meta_labels_from_fields()
+
+    def _update_meta_labels_from_fields(self):
+        if getattr(self, "scene", None) is None:
+            return
+        if self._meta_refdes_item is None or self._meta_value_item is None:
+            return
+        kind = self.kind_edit.text().strip()
+        prefix = self.prefix_edit.text().strip() or (kind[:1].upper() if kind else "X")
+        display = self.display_edit.text().strip() or kind or "Component"
+        self._meta_refdes_item.setPlainText(f"{prefix}?")
+        self._meta_value_item.setPlainText(display)
+        if not self._meta_refdes_item._manual_pos:
+            self._meta_refdes_item.set_default_pos(self._meta_label_default_pos("refdes", self._meta_refdes_item))
+        if not self._meta_value_item._manual_pos:
+            self._meta_value_item.set_default_pos(self._meta_label_default_pos("value", self._meta_value_item))
+        self._apply_item_theme(self._meta_refdes_item)
+        self._apply_item_theme(self._meta_value_item)
+
     def _apply_editor_theme(self, theme):
         bg = theme.bg
         self.scene.setBackgroundBrush(bg)
@@ -688,27 +993,54 @@ class CustomComponentDialog(QDialog):
         role = item.data(0)
         if role == "symbol":
             if isinstance(item, QGraphicsTextItem):
-                item.setDefaultTextColor(self._symbol_pen_color)
+                if item.data(1) == "preview":
+                    item.setDefaultTextColor(QColor(77, 200, 255))
+                else:
+                    item.setDefaultTextColor(self._symbol_pen_color)
                 return
             if hasattr(item, "pen"):
                 pen = item.pen()
                 if pen.style() != Qt.NoPen:
-                    pen.setColor(self._symbol_pen_color)
+                    if item.data(1) == "preview":
+                        pen.setColor(QColor(77, 200, 255))
+                        pen.setStyle(Qt.DashLine)
+                    else:
+                        pen.setColor(self._symbol_pen_color)
                     item.setPen(pen)
             if hasattr(item, "brush"):
                 brush = item.brush()
                 if brush.style() != Qt.NoBrush:
-                    fill = QColor(self._symbol_pen_color)
-                    fill.setAlpha(36)
+                    if item.data(1) == "preview":
+                        fill = QColor(77, 200, 255)
+                        fill.setAlpha(28)
+                    else:
+                        fill = QColor(self._symbol_pen_color)
+                        fill.setAlpha(36)
                     item.setBrush(QBrush(fill))
         elif role == "pin":
             if hasattr(item, "setPen"):
                 item.setPen(QPen(self._symbol_pen_color, 1))
             if hasattr(item, "label"):
                 item.label.setDefaultTextColor(self._pin_label_color)
+        elif role == "meta_label":
+            if isinstance(item, QGraphicsTextItem):
+                field_color = QColor(255, 210, 90)
+                item.setDefaultTextColor(field_color)
+                font = item.font()
+                font.setPointSize(max(12, int(self._font_size)))
+                font.setBold(True)
+                item.setFont(font)
 
     def _set_tool(self, tool: str):
         """Set the active drawing tool and reset transient state."""
+        previous_tool = self._tool
+        self._discard_active_preview_items()
+        self._clear_pin_preview()
+        if tool != "text":
+            self._clear_text_preview()
+        if tool == "text" and self._text_pending is None:
+            if not self._begin_text_placement():
+                tool = previous_tool
         self._tool = tool
         self._update_tool_buttons()
         if tool == "select":
@@ -716,33 +1048,147 @@ class CustomComponentDialog(QDialog):
         else:
             self.view.setDragMode(QGraphicsView.NoDrag)
         self._start = None
-        self._active_item = None
         self._poly_points = []
-        self._poly_item = None
+        self._curve_points = []
         hints = {
             "select": "Select, move, rotate, mirror, duplicate, and style existing shapes.",
-            "line": "Click-drag to draw a line. Hold Shift to constrain to horizontal, vertical, or 45 degrees.",
-            "rect": "Click-drag to draw a rectangle. Hold Shift for a square.",
-            "ellipse": "Click-drag to draw an ellipse. Hold Shift for a circle.",
-            "arc": "Click-drag to draw an arc using the Arc Start and Arc Span settings. Hold Shift for a circular arc.",
-            "semicircle": "Click-drag to draw a semicircle. Drag direction chooses whether it bulges up, down, left, or right.",
-            "poly": "Click to place polyline corners. Double-click to finish.",
+            "line": "Click to start a line, keep clicking to extend it, and double-click to finish. Hold Shift to constrain angles.",
+            "rect": "Click once for the first corner, then click again for the opposite corner. Hold Shift for a square.",
+            "ellipse": "Click once for the first corner, move the cursor, then click again for the opposite corner. Hold Shift for a circle.",
+            "arc": "Click once for the start point, move the cursor, then click again for the arc end point. Arc Span controls the bend.",
+            "bezier": "Click start, click end, then place the first and second control handles. Drag edit handles later to refine the curve.",
             "pin": "Click near the guide box edge to place a pin. Pin edge snap keeps terminals tidy.",
-            "text": "Click once to place editable text using the current text template and size.",
+            "text": "Enter text properties, preview the text on canvas, then click to place it.",
         }
         self.status_label.setText(hints.get(tool, "Ready."))
+
+    def _clear_text_preview(self):
+        if self._text_preview_item is not None:
+            try:
+                self.scene.removeItem(self._text_preview_item)
+            except Exception:
+                pass
+        self._text_preview_item = None
+        self._text_pending = None
+
+    def _commit_text_preview(self):
+        if self._text_preview_item is None:
+            return None
+        item = self._text_preview_item
+        self._text_preview_item = None
+        self._text_pending = None
+        self._finalize_preview_item(item)
+        return item
+
+    def _clear_pin_preview(self):
+        if self._pin_preview_item is not None:
+            try:
+                self.scene.removeItem(self._pin_preview_item)
+            except Exception:
+                pass
+        if self._pin_preview_label is not None:
+            try:
+                self.scene.removeItem(self._pin_preview_label)
+            except Exception:
+                pass
+        self._pin_preview_item = None
+        self._pin_preview_label = None
+
+    def _discard_active_preview_items(self):
+        for item in (self._active_item, self._poly_item, self._text_preview_item):
+            if item is None:
+                continue
+            try:
+                self.scene.removeItem(item)
+            except Exception:
+                pass
+        self._active_item = None
+        self._poly_item = None
+        self._curve_points = []
+        self._clear_text_preview()
+        self._clear_pin_preview()
+
+    def _update_pin_preview(self, pos: QPointF):
+        pos = self._snap_to_guide_edge(self.view.snap_point(pos))
+        if self._pin_preview_item is None:
+            self._pin_preview_item = self.scene.addEllipse(
+                -3, -3, 6, 6,
+                QPen(self._symbol_pen_color, 1),
+                QBrush(self._symbol_pen_color),
+            )
+            self._pin_preview_item.setOpacity(0.45)
+            self._pin_preview_item.setZValue(50)
+        self._pin_preview_item.setPos(pos)
+        if self._pin_preview_label is None:
+            self._pin_preview_label = self.scene.addText(f"{self._pin_prefix}{self._pin_index}")
+            self._pin_preview_label.setDefaultTextColor(self._pin_label_color)
+            self._pin_preview_label.setOpacity(0.55)
+            self._pin_preview_label.setZValue(51)
+        self._pin_preview_label.setPlainText(f"{self._pin_prefix}{self._pin_index}")
+        self._pin_preview_label.setPos(pos + QPointF(6, -10))
+
+    def _build_line_path(self, points: List[QPointF], preview: Optional[QPointF] = None) -> QPainterPath:
+        path = QPainterPath(points[0])
+        for point in points[1:]:
+            path.lineTo(point)
+        if preview is not None:
+            path.lineTo(preview)
+        return path
+
+    def _default_arc_control_point(self, start: QPointF, end: QPointF) -> QPointF:
+        dx = end.x() - start.x()
+        dy = end.y() - start.y()
+        chord = (dx * dx + dy * dy) ** 0.5
+        if chord < 1e-6:
+            return QPointF(start)
+        span = float(self._arc_span_deg or 180.0)
+        sign = 1.0 if span >= 0 else -1.0
+        magnitude = max(0.2, min(1.8, abs(span) / 180.0))
+        mid = QPointF((start.x() + end.x()) / 2.0, (start.y() + end.y()) / 2.0)
+        nx = -dy / chord
+        ny = dx / chord
+        offset = chord * 0.5 * magnitude
+        return QPointF(mid.x() + nx * offset * sign, mid.y() + ny * offset * sign)
+
+    def _build_endpoint_arc_path(self, start: QPointF, end: QPointF) -> QPainterPath:
+        path = QPainterPath()
+        if QLineF(start, end).length() < 1e-6:
+            path.moveTo(start)
+            path.lineTo(end)
+            return path
+        path.moveTo(start)
+        path.quadTo(self._default_arc_control_point(start, end), end)
+        return path
+
+    def _begin_text_placement(self) -> bool:
+        dialog = _TextPropertiesDialog(self._default_text, self._font_size, self)
+        if dialog.exec() != QDialog.Accepted:
+            return False
+        text = dialog.text_value()
+        if not text:
+            return False
+        self._clear_text_preview()
+        self._default_text = text
+        self._font_size = int(dialog.font_size_spin.value())
+        self.font_size_spin.setValue(self._font_size)
+        self._text_pending = {"text": text, "font_size": self._font_size}
+        return True
 
     def _clear_canvas(self):
         for item in list(self.scene.items()):
             if item is self._guide_rect:
                 continue
             self.scene.removeItem(item)
+        self._meta_refdes_item = None
+        self._meta_value_item = None
         self._pin_items.clear()
         self.pin_table.setRowCount(0)
         self._start = None
         self._active_item = None
         self._poly_points = []
         self._poly_item = None
+        self._clear_text_preview()
+        self._clear_pin_preview()
         self._editing_kind = None
         self._editing_path = None
         self.type_combo.setCurrentText("Component")
@@ -750,18 +1196,21 @@ class CustomComponentDialog(QDialog):
         self._sync_type_fields()
         self._copy_buffer.clear()
         self.pin_index_spin.setValue(1)
+        self._ensure_meta_labels()
+        self._refresh_edit_handles()
 
     def _delete_selected(self):
         for item in list(self.scene.selectedItems()):
-            if item is self._guide_rect:
+            if item is self._guide_rect or item.data(0) == "meta_label":
                 continue
             self.scene.removeItem(item)
         self._pin_items = [p for p in self._pin_items if p.scene() is not None]
         self._refresh_pin_table()
+        self._refresh_edit_handles()
 
     def _duplicate_selected(self):
         for item in self.scene.selectedItems():
-            if item is self._guide_rect:
+            if item is self._guide_rect or item.data(0) == "meta_label":
                 continue
             clone = self._clone_item(item)
             if clone is not None:
@@ -769,11 +1218,12 @@ class CustomComponentDialog(QDialog):
                 self.scene.addItem(clone)
         self._pin_items = [p for p in self._pin_items if p.scene() is not None]
         self._refresh_pin_table()
+        self._refresh_edit_handles()
 
     def _mirror_selected(self, horizontal: bool = True):
         """Mirror selected scene items around their own local centers."""
         for item in self.scene.selectedItems():
-            if item is self._guide_rect:
+            if item is self._guide_rect or item.data(0) == "meta_label":
                 continue
             item.setTransformOriginPoint(item.boundingRect().center())
             sx = -1 if horizontal else 1
@@ -781,14 +1231,16 @@ class CustomComponentDialog(QDialog):
             t = item.transform()
             item.setTransform(t.scale(sx, sy))
         self._pin_moved(None)
+        self._refresh_edit_handles()
 
     def _rotate_selected(self, angle: float):
         for item in self.scene.selectedItems():
-            if item is self._guide_rect:
+            if item is self._guide_rect or item.data(0) == "meta_label":
                 continue
             item.setTransformOriginPoint(item.boundingRect().center())
             item.setRotation((item.rotation() + angle) % 360)
         self._pin_moved(None)
+        self._refresh_edit_handles()
 
     def _pin_moved(self, pin_item):
         self._refresh_pin_table()
@@ -850,6 +1302,16 @@ class CustomComponentDialog(QDialog):
             it.setRotation(item.rotation())
             self._apply_item_theme(it)
             return it
+        if isinstance(item, _ArcPathItem):
+            it = _ArcPathItem(item.start_point, item.end_point, item.control_point, snap)
+            it.setRotation(item.rotation())
+            self._apply_item_theme(it)
+            return it
+        if isinstance(item, _BezierPathItem):
+            it = _BezierPathItem(item.start_point, item.control1_point, item.control2_point, item.end_point, snap)
+            it.setRotation(item.rotation())
+            self._apply_item_theme(it)
+            return it
         if isinstance(item, QGraphicsPathItem):
             it = _SnapPath(item.path(), snap)
             it.setRotation(item.rotation())
@@ -865,7 +1327,7 @@ class CustomComponentDialog(QDialog):
 
     def _serialize_item(self, item) -> Optional[dict]:
         """Convert one selected graphics item into clipboard-safe payload."""
-        if item is self._guide_rect:
+        if item is self._guide_rect or item.data(0) == "meta_label":
             return None
         if item.data(0) == "pin":
             return {"type": "pin", "name": item.name, "pin_number": getattr(item, "pin_number", None), "pos": [item.pos().x(), item.pos().y()]}
@@ -878,6 +1340,23 @@ class CustomComponentDialog(QDialog):
         if isinstance(item, QGraphicsEllipseItem) and item.data(0) == "symbol":
             r = item.rect()
             return {"type": "ellipse", "rect": [r.x(), r.y(), r.width(), r.height()], "rot": item.rotation()}
+        if isinstance(item, _ArcPathItem):
+            return {
+                "type": "arc",
+                "start": [item.start_point.x(), item.start_point.y()],
+                "control": [item.control_point.x(), item.control_point.y()],
+                "end": [item.end_point.x(), item.end_point.y()],
+                "rot": item.rotation(),
+            }
+        if isinstance(item, _BezierPathItem):
+            return {
+                "type": "bezier",
+                "start": [item.start_point.x(), item.start_point.y()],
+                "control1": [item.control1_point.x(), item.control1_point.y()],
+                "control2": [item.control2_point.x(), item.control2_point.y()],
+                "end": [item.end_point.x(), item.end_point.y()],
+                "rot": item.rotation(),
+            }
         if isinstance(item, QGraphicsPathItem):
             path = item.path()
             pts = []
@@ -922,6 +1401,36 @@ class CustomComponentDialog(QDialog):
         if t == "ellipse":
             x, y, w, h = payload["rect"]
             it = _SnapEllipse(QRectF(x + offset.x(), y + offset.y(), w, h), snap)
+            it.setRotation(payload.get("rot", 0))
+            self.scene.addItem(it)
+            self._apply_item_theme(it)
+            return
+        if t == "arc":
+            sx, sy = payload.get("start", [0, 0])
+            cx, cy = payload.get("control", [0, 0])
+            ex, ey = payload.get("end", [0, 0])
+            it = _ArcPathItem(
+                QPointF(sx, sy) + offset,
+                QPointF(ex, ey) + offset,
+                QPointF(cx, cy) + offset,
+                snap,
+            )
+            it.setRotation(payload.get("rot", 0))
+            self.scene.addItem(it)
+            self._apply_item_theme(it)
+            return
+        if t == "bezier":
+            sx, sy = payload.get("start", [0, 0])
+            c1x, c1y = payload.get("control1", [0, 0])
+            c2x, c2y = payload.get("control2", [0, 0])
+            ex, ey = payload.get("end", [0, 0])
+            it = _BezierPathItem(
+                QPointF(sx, sy) + offset,
+                QPointF(c1x, c1y) + offset,
+                QPointF(c2x, c2y) + offset,
+                QPointF(ex, ey) + offset,
+                snap,
+            )
             it.setRotation(payload.get("rot", 0))
             self.scene.addItem(it)
             self._apply_item_theme(it)
@@ -996,8 +1505,23 @@ class CustomComponentDialog(QDialog):
         path.arcTo(rect, float(self._arc_start_deg), float(self._arc_span_deg))
         return path
 
+    def _build_bezier_path(
+        self,
+        start: QPointF,
+        end: QPointF,
+        control1: Optional[QPointF] = None,
+        control2: Optional[QPointF] = None,
+    ) -> QPainterPath:
+        if control1 is None:
+            control1 = QPointF(start.x() + (end.x() - start.x()) / 3.0, start.y())
+        if control2 is None:
+            control2 = QPointF(start.x() + 2.0 * (end.x() - start.x()) / 3.0, end.y())
+        path = QPainterPath(start)
+        path.cubicTo(control1, control2, end)
+        return path
+
     def _apply_style_to_item(self, item):
-        if item is self._guide_rect or item.data(0) == "pin":
+        if item is self._guide_rect or item.data(0) in {"pin", "meta_label"}:
             return
         if isinstance(item, (QGraphicsLineItem, QGraphicsRectItem, QGraphicsEllipseItem, QGraphicsPathItem)):
             item.setPen(self._current_symbol_pen())
@@ -1014,12 +1538,211 @@ class CustomComponentDialog(QDialog):
             self._apply_style_to_item(item)
         self.view.viewport().update()
 
-    def _export_symbol_json(self, json_path: Path):
-        """Convert scene items into normalized JSON symbol format.
+    def _clear_edit_handles(self):
+        for handle in self._edit_handles:
+            try:
+                if handle.scene() is not None:
+                    handle.scene().removeItem(handle)
+            except Exception:
+                pass
+        self._edit_handles = []
+        self._handle_target = None
 
-        Returns transform used for normalization so pins can be exported in the
-        same coordinate space.
-        """
+    def _flatten_curve_item(self, item):
+        if isinstance(item, _ArcPathItem):
+            start = item.mapToScene(item.start_point)
+            end = item.mapToScene(item.end_point)
+            control = item.mapToScene(item.control_point)
+            item.setTransform(QTransform())
+            item.setRotation(0.0)
+            item.setPos(QPointF(0.0, 0.0))
+            item.start_point = QPointF(start)
+            item.end_point = QPointF(end)
+            item.control_point = QPointF(control)
+            item.rebuild_path()
+        elif isinstance(item, _BezierPathItem):
+            start = item.mapToScene(item.start_point)
+            end = item.mapToScene(item.end_point)
+            control1 = item.mapToScene(item.control1_point)
+            control2 = item.mapToScene(item.control2_point)
+            item.setTransform(QTransform())
+            item.setRotation(0.0)
+            item.setPos(QPointF(0.0, 0.0))
+            item.start_point = QPointF(start)
+            item.end_point = QPointF(end)
+            item.control1_point = QPointF(control1)
+            item.control2_point = QPointF(control2)
+            item.rebuild_path()
+
+    def _refresh_edit_handles(self):
+        self._clear_edit_handles()
+        selection = [
+            item for item in self.scene.selectedItems()
+            if item is not self._guide_rect and item.data(0) not in {"pin", "meta_label", "edit_handle"}
+        ]
+        if len(selection) != 1:
+            return
+        item = selection[0]
+        if isinstance(item, (_ArcPathItem, _BezierPathItem)):
+            self._flatten_curve_item(item)
+        self._handle_target = item
+
+        def add_handle(role: str, pos: QPointF, circular: bool = False):
+            handle = _EditHandle(role, self.view.snap_point, self._handle_moved, circular=circular)
+            self.scene.addItem(handle)
+            handle.set_handle_pos(pos)
+            self._edit_handles.append(handle)
+
+        if isinstance(item, QGraphicsLineItem):
+            ln = item.line()
+            start = item.mapToScene(QPointF(ln.x1(), ln.y1()))
+            end = item.mapToScene(QPointF(ln.x2(), ln.y2()))
+            add_handle("line_start", start)
+            add_handle("line_mid", QPointF((start.x() + end.x()) / 2.0, (start.y() + end.y()) / 2.0), circular=True)
+            add_handle("line_end", end)
+            return
+
+        if isinstance(item, (QGraphicsRectItem, QGraphicsEllipseItem)) and item.data(0) == "symbol":
+            r = item.rect()
+            pts = {
+                "shape_tl": item.mapToScene(QPointF(r.left(), r.top())),
+                "shape_tm": item.mapToScene(QPointF(r.center().x(), r.top())),
+                "shape_tr": item.mapToScene(QPointF(r.right(), r.top())),
+                "shape_ml": item.mapToScene(QPointF(r.left(), r.center().y())),
+                "shape_mm": item.mapToScene(QPointF(r.center().x(), r.center().y())),
+                "shape_mr": item.mapToScene(QPointF(r.right(), r.center().y())),
+                "shape_bl": item.mapToScene(QPointF(r.left(), r.bottom())),
+                "shape_bm": item.mapToScene(QPointF(r.center().x(), r.bottom())),
+                "shape_br": item.mapToScene(QPointF(r.right(), r.bottom())),
+            }
+            for role, pt in pts.items():
+                add_handle(role, pt, circular=(role == "shape_mm"))
+            return
+
+        if isinstance(item, _ArcPathItem):
+            add_handle("arc_start", item.mapToScene(item.start_point))
+            add_handle("arc_control", item.mapToScene(item.control_point), circular=True)
+            add_handle("arc_end", item.mapToScene(item.end_point))
+            return
+
+        if isinstance(item, _BezierPathItem):
+            add_handle("bezier_start", item.mapToScene(item.start_point))
+            add_handle("bezier_c1", item.mapToScene(item.control1_point), circular=True)
+            add_handle("bezier_c2", item.mapToScene(item.control2_point), circular=True)
+            add_handle("bezier_end", item.mapToScene(item.end_point))
+            return
+
+    def _reposition_edit_handles(self):
+        item = self._handle_target
+        if item is None or not self._edit_handles:
+            return
+        role_to_pos: dict[str, QPointF] = {}
+        if isinstance(item, QGraphicsLineItem):
+            ln = item.line()
+            start = item.mapToScene(QPointF(ln.x1(), ln.y1()))
+            end = item.mapToScene(QPointF(ln.x2(), ln.y2()))
+            role_to_pos = {
+                "line_start": start,
+                "line_mid": QPointF((start.x() + end.x()) / 2.0, (start.y() + end.y()) / 2.0),
+                "line_end": end,
+            }
+        elif isinstance(item, (QGraphicsRectItem, QGraphicsEllipseItem)) and item.data(0) == "symbol":
+            r = item.rect()
+            role_to_pos = {
+                "shape_tl": item.mapToScene(QPointF(r.left(), r.top())),
+                "shape_tm": item.mapToScene(QPointF(r.center().x(), r.top())),
+                "shape_tr": item.mapToScene(QPointF(r.right(), r.top())),
+                "shape_ml": item.mapToScene(QPointF(r.left(), r.center().y())),
+                "shape_mm": item.mapToScene(QPointF(r.center().x(), r.center().y())),
+                "shape_mr": item.mapToScene(QPointF(r.right(), r.center().y())),
+                "shape_bl": item.mapToScene(QPointF(r.left(), r.bottom())),
+                "shape_bm": item.mapToScene(QPointF(r.center().x(), r.bottom())),
+                "shape_br": item.mapToScene(QPointF(r.right(), r.bottom())),
+            }
+        elif isinstance(item, _ArcPathItem):
+            role_to_pos = {
+                "arc_start": item.mapToScene(item.start_point),
+                "arc_control": item.mapToScene(item.control_point),
+                "arc_end": item.mapToScene(item.end_point),
+            }
+        elif isinstance(item, _BezierPathItem):
+            role_to_pos = {
+                "bezier_start": item.mapToScene(item.start_point),
+                "bezier_c1": item.mapToScene(item.control1_point),
+                "bezier_c2": item.mapToScene(item.control2_point),
+                "bezier_end": item.mapToScene(item.end_point),
+            }
+        for handle in self._edit_handles:
+            pos = role_to_pos.get(handle.role)
+            if pos is not None:
+                handle.set_handle_pos(pos)
+
+    def _handle_moved(self, handle: _EditHandle, old_pos: QPointF, new_pos: QPointF):
+        item = self._handle_target
+        if item is None:
+            return
+        role = handle.role
+
+        if isinstance(item, QGraphicsLineItem):
+            ln = item.line()
+            if role == "line_mid":
+                item.setPos(item.pos() + (new_pos - old_pos))
+            else:
+                local = item.mapFromScene(new_pos)
+                if role == "line_start":
+                    ln.setP1(local)
+                elif role == "line_end":
+                    ln.setP2(local)
+                item.setLine(ln)
+            self._reposition_edit_handles()
+            return
+
+        if isinstance(item, (QGraphicsRectItem, QGraphicsEllipseItem)) and item.data(0) == "symbol":
+            if role == "shape_mm":
+                item.setPos(item.pos() + (new_pos - old_pos))
+            else:
+                rect = QRectF(item.rect())
+                local = item.mapFromScene(new_pos)
+                if role in {"shape_tl", "shape_ml", "shape_bl"}:
+                    rect.setLeft(local.x())
+                if role in {"shape_tr", "shape_mr", "shape_br"}:
+                    rect.setRight(local.x())
+                if role in {"shape_tl", "shape_tm", "shape_tr"}:
+                    rect.setTop(local.y())
+                if role in {"shape_bl", "shape_bm", "shape_br"}:
+                    rect.setBottom(local.y())
+                item.setRect(rect.normalized())
+            self._reposition_edit_handles()
+            return
+
+        if isinstance(item, _ArcPathItem):
+            local = item.mapFromScene(new_pos)
+            if role == "arc_start":
+                item.start_point = local
+            elif role == "arc_end":
+                item.end_point = local
+            elif role == "arc_control":
+                item.control_point = local
+            item.rebuild_path()
+            self._reposition_edit_handles()
+            return
+
+        if isinstance(item, _BezierPathItem):
+            local = item.mapFromScene(new_pos)
+            if role == "bezier_start":
+                item.start_point = local
+            elif role == "bezier_end":
+                item.end_point = local
+            elif role == "bezier_c1":
+                item.control1_point = local
+            elif role == "bezier_c2":
+                item.control2_point = local
+            item.rebuild_path()
+            self._reposition_edit_handles()
+            return
+
+    def _export_symbol_json(self, json_path: Path):
+        """Convert scene items into symbol JSON without auto-fitting to the guide."""
         symbol_items = []
         bounds = None
         for it in self.scene.items():
@@ -1033,25 +1756,8 @@ class CustomComponentDialog(QDialog):
             bounds = QRectF(-GUIDE_WIDTH / 2, -GUIDE_HEIGHT / 2, GUIDE_WIDTH, GUIDE_HEIGHT)
         bounds = bounds.adjusted(-GUIDE_PADDING, -GUIDE_PADDING, GUIDE_PADDING, GUIDE_PADDING)
 
-        # Normalize all saved geometry into the guide box so custom symbols
-        # keep consistent size when instantiated.
-        target = self._guide_rect.rect().adjusted(
-            GUIDE_PADDING,
-            GUIDE_PADDING,
-            -GUIDE_PADDING,
-            -GUIDE_PADDING,
-        )
-        if bounds.width() > 1e-9 and bounds.height() > 1e-9:
-            sx = target.width() / bounds.width()
-            sy = target.height() / bounds.height()
-            scale = min(sx, sy)
-        else:
-            scale = 1.0
-        tx = target.center().x() - bounds.center().x() * scale
-        ty = target.center().y() - bounds.center().y() * scale
-
         def _norm_point(p: QPointF) -> QPointF:
-            return QPointF(p.x() * scale + tx, p.y() * scale + ty)
+            return QPointF(p.x(), p.y())
 
         shapes = []
         for it in symbol_items:
@@ -1071,6 +1777,30 @@ class CustomComponentDialog(QDialog):
                 tl = _norm_point(tr.map(QPointF(r.left(), r.top())))
                 br = _norm_point(tr.map(QPointF(r.right(), r.bottom())))
                 shapes.append({"type": "ellipse", "x": tl.x(), "y": tl.y(), "w": br.x() - tl.x(), "h": br.y() - tl.y(), "stroke": float(it.pen().widthF() or 2.0), "fill": it.brush().style() != Qt.NoBrush})
+            elif isinstance(it, _ArcPathItem):
+                start = _norm_point(tr.map(it.start_point))
+                control = _norm_point(tr.map(it.control_point))
+                end = _norm_point(tr.map(it.end_point))
+                shapes.append({
+                    "type": "arc",
+                    "start": [start.x(), start.y()],
+                    "control": [control.x(), control.y()],
+                    "end": [end.x(), end.y()],
+                    "stroke": float(it.pen().widthF() or 2.0),
+                })
+            elif isinstance(it, _BezierPathItem):
+                start = _norm_point(tr.map(it.start_point))
+                control1 = _norm_point(tr.map(it.control1_point))
+                control2 = _norm_point(tr.map(it.control2_point))
+                end = _norm_point(tr.map(it.end_point))
+                shapes.append({
+                    "type": "bezier",
+                    "start": [start.x(), start.y()],
+                    "control1": [control1.x(), control1.y()],
+                    "control2": [control2.x(), control2.y()],
+                    "end": [end.x(), end.y()],
+                    "stroke": float(it.pen().widthF() or 2.0),
+                })
             elif isinstance(it, QGraphicsPathItem):
                 pts = []
                 path = it.path()
@@ -1089,11 +1819,11 @@ class CustomComponentDialog(QDialog):
                 })
 
         data = {
-            "bounds": [target.left(), target.top(), target.width(), target.height()],
+            "bounds": [bounds.left(), bounds.top(), bounds.width(), bounds.height()],
             "shapes": shapes,
         }
         json_path.write_text(json.dumps(data, indent=2))
-        return {"scale": float(scale), "tx": float(tx), "ty": float(ty)}
+        return {"scale": 1.0, "tx": 0.0, "ty": 0.0}
 
     def _save_component(self):
         """Save symbol JSON + component JSON into the library tree."""
@@ -1183,6 +1913,14 @@ class CustomComponentDialog(QDialog):
                 "symbol": f"custom/{safe_kind}.json",
                 "auto_align_terminals": False,
                 "auto_scale_symbol": False,
+                "refdes_pos": list(_norm_xy(
+                    self._meta_refdes_item.scenePos().x(),
+                    self._meta_refdes_item.scenePos().y(),
+                )) if self._meta_refdes_item is not None else None,
+                "value_pos": list(_norm_xy(
+                    self._meta_value_item.scenePos().x(),
+                    self._meta_value_item.scenePos().y(),
+                )) if self._meta_value_item is not None else None,
                 "ports": [
                     {
                         "name": p.name,
@@ -1229,6 +1967,19 @@ class CustomComponentDialog(QDialog):
         self._sync_type_fields()
         self._editing_kind = kind
         self._editing_path = comp_path
+        self._ensure_meta_labels()
+        refdes_pos = entry.get("refdes_pos")
+        value_pos = entry.get("value_pos")
+        if self._meta_refdes_item is not None:
+            self._meta_refdes_item._manual_pos = False
+            if isinstance(refdes_pos, (list, tuple)) and len(refdes_pos) == 2:
+                self._meta_refdes_item.set_default_pos(QPointF(float(refdes_pos[0]), float(refdes_pos[1])))
+                self._meta_refdes_item._manual_pos = True
+        if self._meta_value_item is not None:
+            self._meta_value_item._manual_pos = False
+            if isinstance(value_pos, (list, tuple)) and len(value_pos) == 2:
+                self._meta_value_item.set_default_pos(QPointF(float(value_pos[0]), float(value_pos[1])))
+                self._meta_value_item._manual_pos = True
 
         symbol = entry.get("symbol", "")
         if symbol.endswith(".json"):
@@ -1255,6 +2006,29 @@ class CustomComponentDialog(QDialog):
                             pen = it.pen(); pen.setWidthF(float(shape.get("stroke", 2.0))); it.setPen(pen)
                             if shape.get("fill"):
                                 fill = QColor(self._symbol_pen_color); fill.setAlpha(36); it.setBrush(QBrush(fill))
+                            self.scene.addItem(it)
+                            self._apply_item_theme(it)
+                        elif t == "arc":
+                            sx, sy = shape.get("start", [0.0, 0.0])
+                            cx, cy = shape.get("control", [0.0, 0.0])
+                            ex, ey = shape.get("end", [0.0, 0.0])
+                            it = _ArcPathItem(QPointF(sx, sy), QPointF(ex, ey), QPointF(cx, cy), self.view.snap_point)
+                            pen = it.pen(); pen.setWidthF(float(shape.get("stroke", 2.0))); it.setPen(pen)
+                            self.scene.addItem(it)
+                            self._apply_item_theme(it)
+                        elif t == "bezier":
+                            sx, sy = shape.get("start", [0.0, 0.0])
+                            c1x, c1y = shape.get("control1", [0.0, 0.0])
+                            c2x, c2y = shape.get("control2", [0.0, 0.0])
+                            ex, ey = shape.get("end", [0.0, 0.0])
+                            it = _BezierPathItem(
+                                QPointF(sx, sy),
+                                QPointF(c1x, c1y),
+                                QPointF(c2x, c2y),
+                                QPointF(ex, ey),
+                                self.view.snap_point,
+                            )
+                            pen = it.pen(); pen.setWidthF(float(shape.get("stroke", 2.0))); it.setPen(pen)
                             self.scene.addItem(it)
                             self._apply_item_theme(it)
                         elif t == "polyline":
@@ -1297,11 +2071,10 @@ class CustomComponentDialog(QDialog):
         """Keyboard workflow for editing: copy/paste/rotate/nudge/delete."""
         if e.key() == Qt.Key_Escape:
             # Use Esc to return to select mode instead of closing dialog.
+            self._discard_active_preview_items()
             self._set_tool("select")
             self._start = None
-            self._active_item = None
             self._poly_points = []
-            self._poly_item = None
             self.scene.clearSelection()
             e.accept()
             return
@@ -1371,8 +2144,9 @@ class CustomComponentDialog(QDialog):
                 pos = self.view.mapToScene(event.pos())
                 pos = self.view.snap_point(pos)
                 if event.button() == Qt.RightButton:
+                    self._discard_active_preview_items()
                     self._poly_points = []
-                    self._poly_item = None
+                    self._curve_points = []
                     self._start = None
                     return True
                 if event.button() == Qt.LeftButton:
@@ -1385,98 +2159,168 @@ class CustomComponentDialog(QDialog):
                         self._refresh_pin_table()
                         return True
                     if self._tool == "line":
-                        self._start = pos
-                        self._active_item = _SnapLine(QLineF(pos, pos), self.view.snap_point)
-                        self.scene.addItem(self._active_item)
-                        self._apply_style_to_item(self._active_item)
-                        self._apply_item_theme(self._active_item)
-                        return True
-                    if self._tool == "rect":
-                        self._start = pos
-                        self._active_item = _SnapRect(QRectF(pos, pos), self.view.snap_point)
-                        self.scene.addItem(self._active_item)
-                        self._apply_style_to_item(self._active_item)
-                        self._apply_item_theme(self._active_item)
-                        return True
-                    if self._tool == "ellipse":
-                        self._start = pos
-                        self._active_item = _SnapEllipse(QRectF(pos, pos), self.view.snap_point)
-                        self.scene.addItem(self._active_item)
-                        self._apply_style_to_item(self._active_item)
-                        self._apply_item_theme(self._active_item)
-                        return True
-                    if self._tool == "arc":
-                        self._start = pos
-                        self._active_item = _SnapPath(self._build_arc_path(pos, pos), self.view.snap_point)
-                        self.scene.addItem(self._active_item)
-                        self._apply_style_to_item(self._active_item)
-                        self._apply_item_theme(self._active_item)
-                        return True
-                    if self._tool == "semicircle":
-                        self._start = pos
-                        self._active_item = _SnapPath(self._build_semicircle_path(pos, pos), self.view.snap_point)
-                        self.scene.addItem(self._active_item)
-                        self._apply_style_to_item(self._active_item)
-                        self._apply_item_theme(self._active_item)
-                        return True
-                    if self._tool == "poly":
                         if not self._poly_points:
                             self._poly_points = [pos]
-                            path = QPainterPath(pos)
-                            self._poly_item = _SnapPath(path, self.view.snap_point)
+                            self._poly_item = _SnapPath(self._build_line_path(self._poly_points, pos), self.view.snap_point)
                             self.scene.addItem(self._poly_item)
-                            self._apply_style_to_item(self._poly_item)
-                            self._apply_item_theme(self._poly_item)
+                            self._apply_preview_style_to_item(self._poly_item)
                         else:
                             self._poly_points.append(pos)
                         return True
+                    if self._tool == "rect":
+                        if self._start is None:
+                            self._start = pos
+                            self._active_item = _SnapRect(QRectF(pos, pos), self.view.snap_point)
+                            self.scene.addItem(self._active_item)
+                            self._apply_preview_style_to_item(self._active_item)
+                        else:
+                            self._active_item.setRect(QRectF(self._start, pos).normalized())
+                            self._finalize_preview_item(self._active_item)
+                            self._start = None
+                            self._active_item = None
+                        return True
+                    if self._tool == "ellipse":
+                        if self._start is None:
+                            self._start = pos
+                            self._active_item = _SnapEllipse(QRectF(pos, pos), self.view.snap_point)
+                            self.scene.addItem(self._active_item)
+                            self._apply_preview_style_to_item(self._active_item)
+                        else:
+                            self._active_item.setRect(QRectF(self._start, pos).normalized())
+                            self._finalize_preview_item(self._active_item)
+                            self._start = None
+                            self._active_item = None
+                        return True
+                    if self._tool == "arc":
+                        if self._start is None:
+                            self._start = pos
+                            self._active_item = _ArcPathItem(pos, pos, self._default_arc_control_point(pos, pos), self.view.snap_point)
+                            self.scene.addItem(self._active_item)
+                            self._apply_preview_style_to_item(self._active_item)
+                        else:
+                            if event.modifiers() & Qt.ShiftModifier:
+                                pos = self._constrain_point(self._start, pos, "line")
+                            control = self._default_arc_control_point(self._start, pos)
+                            self._active_item.start_point = QPointF(self._start)
+                            self._active_item.end_point = QPointF(pos)
+                            self._active_item.control_point = QPointF(control)
+                            self._active_item.rebuild_path()
+                            self._finalize_preview_item(self._active_item)
+                            self._start = None
+                            self._active_item = None
+                        return True
+                    if self._tool == "bezier":
+                        if len(self._curve_points) == 0:
+                            self._curve_points = [pos]
+                            self._active_item = _BezierPathItem(pos, pos, pos, pos, self.view.snap_point)
+                            self.scene.addItem(self._active_item)
+                            self._apply_preview_style_to_item(self._active_item)
+                        elif len(self._curve_points) == 1:
+                            self._curve_points.append(pos)
+                        elif len(self._curve_points) == 2:
+                            self._curve_points.append(pos)
+                        else:
+                            self._curve_points.append(pos)
+                            start, end, c1, c2 = self._curve_points[0], self._curve_points[1], self._curve_points[2], self._curve_points[3]
+                            self._active_item.start_point = QPointF(start)
+                            self._active_item.end_point = QPointF(end)
+                            self._active_item.control1_point = QPointF(c1)
+                            self._active_item.control2_point = QPointF(c2)
+                            self._active_item.rebuild_path()
+                            self._finalize_preview_item(self._active_item)
+                            self._active_item = None
+                            self._curve_points = []
+                        return True
                     if self._tool == "text":
-                        text_item = _SnapText(self._default_text, self.view.snap_point)
-                        text_item.setPos(pos)
-                        self.scene.addItem(text_item)
-                        self._apply_style_to_item(text_item)
-                        self._apply_item_theme(text_item)
-                        text_item.setFocus()
+                        if self._text_pending is None:
+                            return True
+                        if self._text_preview_item is None:
+                            payload = self._text_pending or {"text": self._default_text, "font_size": self._font_size}
+                            self._text_preview_item = _SnapText(payload["text"], self.view.snap_point)
+                            font = self._text_preview_item.font()
+                            font.setPointSize(int(payload.get("font_size", self._font_size)))
+                            self._text_preview_item.setFont(font)
+                            self.scene.addItem(self._text_preview_item)
+                            self._apply_preview_style_to_item(self._text_preview_item)
+                        self._text_preview_item.setPos(pos)
+                        text_item = self._commit_text_preview()
+                        if text_item is not None:
+                            text_item.setFocus()
+                        self._set_tool("select")
                         return True
             elif et == QEvent.MouseMove:
                 pos = self.view.mapToScene(event.pos())
                 pos = self.view.snap_point(pos)
-                if self._tool in ("line", "rect", "ellipse", "arc", "semicircle") and self._start and self._active_item:
+                if self._tool == "pin":
+                    self._update_pin_preview(pos)
+                    return True
+                if self._tool in ("rect", "ellipse", "arc") and self._start and self._active_item:
                     if event.modifiers() & Qt.ShiftModifier:
-                        constraint_tool = "ellipse" if self._tool in ("arc", "semicircle") else self._tool
+                        constraint_tool = "ellipse" if self._tool == "arc" else self._tool
                         pos = self._constrain_point(self._start, pos, constraint_tool)
-                    if self._tool == "line":
-                        self._active_item.setLine(QLineF(self._start, pos))
-                    elif self._tool == "rect":
+                    if self._tool == "rect":
                         self._active_item.setRect(QRectF(self._start, pos).normalized())
                     elif self._tool == "ellipse":
                         self._active_item.setRect(QRectF(self._start, pos).normalized())
                     elif self._tool == "arc":
-                        self._active_item.setPath(self._build_arc_path(self._start, pos))
-                    elif self._tool == "semicircle":
-                        self._active_item.setPath(self._build_semicircle_path(self._start, pos))
+                        self._active_item.start_point = QPointF(self._start)
+                        self._active_item.end_point = QPointF(pos)
+                        self._active_item.control_point = QPointF(self._default_arc_control_point(self._start, pos))
+                        self._active_item.rebuild_path()
                     return True
-                if self._tool == "poly" and self._poly_item and self._poly_points:
+                if self._tool == "line" and self._poly_item and self._poly_points:
                     if event.modifiers() & Qt.ShiftModifier:
                         last = self._poly_points[-1]
                         pos = self._constrain_point(last, pos, "line")
-                    path = QPainterPath(self._poly_points[0])
-                    for p in self._poly_points[1:]:
-                        path.lineTo(p)
-                    path.lineTo(pos)
-                    self._poly_item.setPath(path)
+                    self._poly_item.setPath(self._build_line_path(self._poly_points, pos))
                     return True
+                if self._tool == "bezier" and self._active_item and self._curve_points:
+                    start = self._curve_points[0]
+                    if len(self._curve_points) == 1:
+                        self._active_item.start_point = QPointF(start)
+                        self._active_item.end_point = QPointF(pos)
+                        self._active_item.control1_point = QPointF(start)
+                        self._active_item.control2_point = QPointF(pos)
+                    elif len(self._curve_points) == 2:
+                        end = self._curve_points[1]
+                        self._active_item.start_point = QPointF(start)
+                        self._active_item.end_point = QPointF(end)
+                        self._active_item.control1_point = QPointF(pos)
+                        self._active_item.control2_point = QPointF(end)
+                    else:
+                        end = self._curve_points[1]
+                        c1 = self._curve_points[2]
+                        self._active_item.start_point = QPointF(start)
+                        self._active_item.end_point = QPointF(end)
+                        self._active_item.control1_point = QPointF(c1)
+                        self._active_item.control2_point = QPointF(pos)
+                    self._active_item.rebuild_path()
+                    return True
+                if self._tool == "text" and self._text_pending is not None:
+                    if self._text_preview_item is None:
+                        self._text_preview_item = _SnapText(self._text_pending["text"], self.view.snap_point)
+                        font = self._text_preview_item.font()
+                        font.setPointSize(int(self._text_pending.get("font_size", self._font_size)))
+                        self._text_preview_item.setFont(font)
+                        self.scene.addItem(self._text_preview_item)
+                        self._apply_preview_style_to_item(self._text_preview_item)
+                        self._text_preview_item.setZValue(60)
+                    self._text_preview_item.setPos(pos)
+                    return True
+            elif et in (QEvent.Leave, QEvent.Hide):
+                self._clear_pin_preview()
             elif et == QEvent.MouseButtonRelease:
-                if self._tool in ("line", "rect", "ellipse", "arc", "semicircle"):
-                    self._start = None
-                    self._active_item = None
-                    return True
+                self._refresh_edit_handles()
             elif et == QEvent.MouseButtonDblClick:
-                if self._tool == "poly" and self._poly_item and self._poly_points:
-                    path = QPainterPath(self._poly_points[0])
-                    for p in self._poly_points[1:]:
-                        path.lineTo(p)
-                    self._poly_item.setPath(path)
+                if self._tool == "line" and self._poly_item and self._poly_points:
+                    pos = self.view.mapToScene(event.pos())
+                    pos = self.view.snap_point(pos)
+                    if event.modifiers() & Qt.ShiftModifier:
+                        pos = self._constrain_point(self._poly_points[-1], pos, "line")
+                    if pos != self._poly_points[-1]:
+                        self._poly_points.append(pos)
+                    self._poly_item.setPath(self._build_line_path(self._poly_points))
+                    self._finalize_preview_item(self._poly_item)
                     self._poly_points = []
                     self._poly_item = None
                     return True

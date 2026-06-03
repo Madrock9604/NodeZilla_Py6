@@ -294,6 +294,10 @@ class PlPanel(QWidget):
             return "diode"
         if t in {"instrument", "x"}:
             return "instrument"
+        if t in {"switch", "s"}:
+            return "switch"
+        if t in {"ic", "u"}:
+            return "ic"
         return t
 
     @classmethod
@@ -301,6 +305,8 @@ class PlPanel(QWidget):
         kind = str(getattr(comp, "kind", "")).strip().lower()
         display = str(getattr(comp_def, "display_name", "")).strip().lower() if comp_def else ""
         spice = str(getattr(comp_def, "spice_type", "")).strip().upper() if comp_def else ""
+        if not spice:
+            spice = str(getattr(comp, "spice_type", "")).strip().upper()
         if spice == "R" or "resistor" in kind or "resistor" in display:
             return "resistor"
         if spice == "C" or "capacitor" in kind or "capacitor" in display:
@@ -311,6 +317,10 @@ class PlPanel(QWidget):
             return "diode"
         if spice == "X" or "instrument" in display or "wavegen" in kind or "oscope" in kind:
             return "instrument"
+        if spice == "S" or "switch" in kind or "switch" in display:
+            return "switch"
+        if spice == "U" or "ic" == kind or kind.startswith("ic_") or "integrated circuit" in display:
+            return "ic"
         return cls._canonical_type_name(kind or display)
 
     @classmethod

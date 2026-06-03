@@ -191,8 +191,11 @@ class CreateComponentDataSet:
                 for line in PL:
                     if not line.startswith(tuple(ignore_prefix)):
                         Component_Attributes = line.split()
-                        ComponentDataSet.append(Component(Componentid, Component_Attributes))
-                        Componentid += 1
+                        try:
+                            ComponentDataSet.append(Component(Componentid, Component_Attributes))
+                            Componentid += 1
+                        except ValueError as exc:
+                            print(f"Warning: skipping unsupported PL component line: {line.strip()} ({exc})")
                         pass
                 pass
         except FileNotFoundError:
@@ -234,7 +237,7 @@ class ComponentSerach:
                     Componentfound = True
                     ComponentSerach.AssignNetToPin(Component, Requested_Component)
             else:
-                if Requested_Component.type == Component.type and Requested_Component.partnum == Component.partnum:
+                if Requested_Component.type == Component.type and Requested_Component.partnum == Component.partnum and not(Component.used):
                     Componentfound = True
                     ComponentSerach.AssignNetToPin(Component, Requested_Component)
                     pass
@@ -260,26 +263,33 @@ class ComponentSerach:
         return Used_Components
 
 class Component:
+    ComponentTypes = {
+        "r": "Resistor",
+        "R": "Resistor",
+        "c": "Capacitor",
+        "C": "Capacitor",
+        "l": "Inductor",
+        "L": "Inductor",
+        "d": "Diode",
+        "D": "Diode",
+        "X": "Instrument",
+        "x": "Op-Amp",
+        "Q": "Transistor",
+        "q": "Transistor",
+        "S": "Switch",
+        "s": "Switch",
+        "U": "IC",
+        "u": "IC",
+    }
     
     def __init__(self, ID, CompLine):
         #IMPORTANT NOTE: System differentiate Meters than Scopes by using the name
-        ComponentTypes = {
-            "r": "Resistor",
-            "R": "Resistor",
-            "c": "Capacitor",
-            "C": "Capacitor",
-            "l": "Inductor",
-            "L": "Inductor",
-            "d": "Diode",
-            "D": "Diode",
-            "X": "Instrument",
-            "x": "Op-Amp",
-            "Q": "Transistor",
-            "q": "Transistor"
-        }
-        
+        prefix = CompLine[0][0]
+        if prefix not in self.ComponentTypes:
+            raise ValueError(f"unsupported component prefix '{prefix}'")
+
         self.ID = ID
-        self.type = ComponentTypes[CompLine[0][0]]
+        self.type = self.ComponentTypes[prefix]
         self.name = CompLine[0][1:]
         self.pin = []
         if(self.type == "Resistor" or self.type == "Capacitor" or self.type == "Inductor"):

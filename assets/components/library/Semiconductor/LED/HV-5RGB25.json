@@ -1,0 +1,51 @@
+{
+  "kind": "HV-5RGB25",
+  "display_name": "HV-5RGB25",
+  "category": "Semiconductor / LED",
+  "prefix": "RGB",
+  "multipart_family": "",
+  "unit_name": "",
+  "spice_type": "d",
+  "value_label": "Part Number",
+  "show_value": true,
+  "default_value": "HV-5RGB25",
+  "type": "component",
+  "net_name": "",
+  "symbol": "custom/HV-5RGB25.json",
+  "auto_align_terminals": false,
+  "auto_scale_symbol": false,
+  "refdes_pos": [
+    -20.0,
+    -120.0
+  ],
+  "value_pos": [
+    -40.0,
+    100.0
+  ],
+  "ports": [
+    {
+      "name": "P1",
+      "pin_number": null,
+      "x": -100.0,
+      "y": -60.0
+    },
+    {
+      "name": "P2",
+      "pin_number": null,
+      "x": -100.0,
+      "y": 0.0
+    },
+    {
+      "name": "P3",
+      "pin_number": null,
+      "x": 100.0,
+      "y": 0.0
+    },
+    {
+      "name": "P4",
+      "pin_number": null,
+      "x": -100.0,
+      "y": 60.0
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "kind": "B3F-1000",
+  "display_name": "B3F-1000",
+  "category": "Switches",
+  "prefix": "S",
+  "multipart_family": "",
+  "unit_name": "",
+  "spice_type": "s",
+  "value_label": "Part Number",
+  "show_value": true,
+  "default_value": "B3F-1000",
+  "type": "component",
+  "net_name": "",
+  "symbol": "custom/B3F-1000.json",
+  "auto_align_terminals": false,
+  "auto_scale_symbol": false,
+  "refdes_pos": [
+    -10.0,
+    -50.0
+  ],
+  "value_pos": [
+    -30.0,
+    10.0
+  ],
+  "ports": [
+    {
+      "name": "P1",
+      "pin_number": null,
+      "x": -60.0,
+      "y": 0.0
+    },
+    {
+      "name": "P2",
+      "pin_number": null,
+      "x": 60.0,
+      "y": 0.0
+    }
+  ]
+}

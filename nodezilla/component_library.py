@@ -38,6 +38,8 @@ class ComponentDef:
     spice_type: str = ""
     # Default value/part number assigned when placing a new component.
     default_value: str = ""
+    refdes_pos: tuple[float, float] | None = None
+    value_pos: tuple[float, float] | None = None
     # Hierarchical "black-box" component that owns an internal schematic.
     is_chip: bool = False
     # Optional chip template path under assets/chips (e.g., "library/my_chip.json").
@@ -119,6 +121,16 @@ def _parse_component(
         value_label=value_label,
         spice_type=spice_type,
         default_value=default_value,
+        refdes_pos=(
+            (float(entry["refdes_pos"][0]), float(entry["refdes_pos"][1]))
+            if isinstance(entry.get("refdes_pos"), (list, tuple)) and len(entry.get("refdes_pos")) == 2
+            else None
+        ),
+        value_pos=(
+            (float(entry["value_pos"][0]), float(entry["value_pos"][1]))
+            if isinstance(entry.get("value_pos"), (list, tuple)) and len(entry.get("value_pos")) == 2
+            else None
+        ),
         is_chip=bool(entry.get("is_chip", False)),
         chip_template=str(entry.get("chip_template", "")).strip(),
         visible=bool(entry.get("visible", True)),

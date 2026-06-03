@@ -395,16 +395,24 @@ class ComponentItem(QGraphicsRectItem):
         br = self.routing_local_rect()
         self.refdes_label.setVisible(not is_net)
         if not self.refdes_label._manual_pos:
-            self.refdes_label.set_default_pos(QPointF(-self.refdes_label.boundingRect().width() / 2, br.top() - 18))
-        if not self.value_label._manual_pos:
-            if is_net:
-                self.value_label.set_default_pos(
-                    QPointF(br.right() + 6, -self.value_label.boundingRect().height() / 2)
-                )
+            authored_refdes = getattr(self._comp_def, "refdes_pos", None) if self._comp_def else None
+            if authored_refdes is not None:
+                self.refdes_label.set_default_pos(QPointF(float(authored_refdes[0]), float(authored_refdes[1])))
             else:
-                self.value_label.set_default_pos(
-                    QPointF(-self.value_label.boundingRect().width() / 2, br.bottom() + 4)
-                )
+                self.refdes_label.set_default_pos(QPointF(-self.refdes_label.boundingRect().width() / 2, br.top() - 18))
+        if not self.value_label._manual_pos:
+            authored_value = getattr(self._comp_def, "value_pos", None) if self._comp_def else None
+            if authored_value is not None:
+                self.value_label.set_default_pos(QPointF(float(authored_value[0]), float(authored_value[1])))
+            else:
+                if is_net:
+                    self.value_label.set_default_pos(
+                        QPointF(br.right() + 6, -self.value_label.boundingRect().height() / 2)
+                    )
+                else:
+                    self.value_label.set_default_pos(
+                        QPointF(-self.value_label.boundingRect().width() / 2, br.bottom() + 4)
+                    )
 
         # Keep text upright/readable for both rotation and mirroring.
         label_tf = QTransform()
@@ -676,6 +684,26 @@ class ComponentItem(QGraphicsRectItem):
                         p.moveTo(pts[0][0], pts[0][1])
                         for x, y in pts[1:]:
                             p.lineTo(x, y)
+                elif t == "arc":
+                    start = shape.get("start", [0.0, 0.0])
+                    control = shape.get("control", [0.0, 0.0])
+                    end = shape.get("end", [0.0, 0.0])
+                    p.moveTo(float(start[0]), float(start[1]))
+                    p.quadTo(
+                        float(control[0]), float(control[1]),
+                        float(end[0]), float(end[1]),
+                    )
+                elif t == "bezier":
+                    start = shape.get("start", [0.0, 0.0])
+                    control1 = shape.get("control1", [0.0, 0.0])
+                    control2 = shape.get("control2", [0.0, 0.0])
+                    end = shape.get("end", [0.0, 0.0])
+                    p.moveTo(float(start[0]), float(start[1]))
+                    p.cubicTo(
+                        float(control1[0]), float(control1[1]),
+                        float(control2[0]), float(control2[1]),
+                        float(end[0]), float(end[1]),
+                    )
                 elif t == "text":
                     txt = QGraphicsTextItem(str(shape.get("text", "")), self)
                     font = txt.font()

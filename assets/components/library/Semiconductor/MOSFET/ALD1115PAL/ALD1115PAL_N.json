@@ -1,0 +1,51 @@
+{
+  "kind": "ALD1115PAL_N",
+  "display_name": "ALD1115PAL",
+  "category": "Semiconductor / MOSFET",
+  "prefix": "Q",
+  "multipart_family": "ALD1115PAL",
+  "unit_name": "NMOS",
+  "spice_type": "q",
+  "value_label": "Part Number",
+  "show_value": true,
+  "default_value": "ALD1115PAL",
+  "type": "component",
+  "net_name": "",
+  "symbol": "custom/ALD1115PAL_N.json",
+  "auto_align_terminals": false,
+  "auto_scale_symbol": false,
+  "refdes_pos": [
+    -10.0,
+    -80.0
+  ],
+  "value_pos": [
+    -40.0,
+    60.0
+  ],
+  "ports": [
+    {
+      "name": "SN",
+      "pin_number": 1,
+      "x": 80.0,
+      "y": 20.0
+    },
+    {
+      "name": "GN",
+      "pin_number": 2,
+      "x": 0.0,
+      "y": -40.0
+    },
+    {
+      "name": "DN",
+      "pin_number": 3,
+      "x": -80.0,
+      "y": 20.0
+    },
+    {
+      "name": "V-",
+      "pin_number": 4,
+      "x": 80.0,
+      "y": 40.0
+    }
+  ]
+}

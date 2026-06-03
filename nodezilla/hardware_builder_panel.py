@@ -237,22 +237,26 @@ class HardwareBuildResult:
 class HardwarePlBuilder:
     def __init__(self, cards_root: Path | None = None):
         self.cards_root = Path(cards_root or user_hardware_cards_dir()).resolve()
-        self._bundled_cards_root = (bundled_root() / "assets" / "hardware_cards").resolve()
+        self._bundled_cards_roots = [
+            (bundled_root() / "assets" / "hardware_cards").resolve(),
+            (bundled_root() / "Hardware" / "Cards").resolve(),
+        ]
 
     def load_cards(self) -> list[HardwareCardDef]:
         by_name: dict[str, HardwareCardDef] = {}
         roots: list[Path] = []
         if self.cards_root.exists():
             roots.append(self.cards_root)
-        if self._bundled_cards_root.exists() and self._bundled_cards_root != self.cards_root:
-            roots.append(self._bundled_cards_root)
+        for bundled_root_path in self._bundled_cards_roots:
+            if bundled_root_path.exists() and bundled_root_path != self.cards_root and bundled_root_path not in roots:
+                roots.append(bundled_root_path)
         for root in roots:
             for path in sorted(root.rglob("*.json"), key=lambda p: p.name.lower()):
                 try:
                     card = HardwareCardDef.from_file(path)
                 except Exception:
                     continue
-                if card.name in by_name and root == self._bundled_cards_root:
+                if card.name in by_name and root != self.cards_root:
                     continue
                 by_name[card.name] = card
         return sorted(by_name.values(), key=lambda c: c.name.lower())

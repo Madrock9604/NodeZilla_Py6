@@ -81,6 +81,7 @@ echo "[1/4] Building macOS app..."
   --collect-all PySide6 \
   "${DWF_ADD_BINARY_ARGS[@]}" \
   --add-data "$ROOT_DIR/assets:assets" \
+  --add-data "$ROOT_DIR/Hardware:Hardware" \
   --add-data "$ROOT_DIR/Examples:Examples" \
   --add-data "$ROOT_DIR/PL.txt:." \
   --workpath "$BUILD_DIR" \
@@ -147,6 +148,7 @@ NodeZilla first-run behavior:
   - assets/components/library/
   - assets/symbols/
   - assets/chips/
+  - Hardware/Cards/
 
 This keeps PL, Library, and Examples accessible and editable outside the app bundle.
 EOF
@@ -186,6 +188,7 @@ mkdir -p "${TARGET_ROOT}/Examples"
 mkdir -p "${TARGET_ROOT}/assets/components/library"
 mkdir -p "${TARGET_ROOT}/assets/symbols"
 mkdir -p "${TARGET_ROOT}/assets/chips"
+mkdir -p "${TARGET_ROOT}/Hardware/Cards"
 mkdir -p "${TARGET_ROOT}/Projects"
 
 copy_missing_tree() {
@@ -241,6 +244,11 @@ copy_first_dir_if_exists "${TARGET_ROOT}/assets/chips" \
   "${APP_PATH}/Contents/MacOS/assets/chips" \
   "${APP_PATH}/Contents/Resources/assets/chips" \
   "${APP_PATH}/Contents/Frameworks/assets/chips"
+
+copy_first_dir_if_exists "${TARGET_ROOT}/Hardware/Cards" \
+  "${APP_PATH}/Contents/MacOS/Hardware/Cards" \
+  "${APP_PATH}/Contents/Resources/Hardware/Cards" \
+  "${APP_PATH}/Contents/Frameworks/Hardware/Cards"
 
 copy_first_file_if_missing "${TARGET_ROOT}/PL.txt" \
   "${APP_PATH}/Contents/MacOS/PL.txt" \

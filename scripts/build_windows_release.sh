@@ -65,6 +65,7 @@ echo "[1/4] Building Windows app with PyInstaller..."
   "${ICON_ARG[@]}" \
   --collect-all PySide6 \
   --add-data "$ROOT_DIR_WIN\\assets;assets" \
+  --add-data "$ROOT_DIR_WIN\\Hardware;Hardware" \
   --add-data "$ROOT_DIR_WIN\\Examples;Examples" \
   --add-data "$ROOT_DIR_WIN\\PL.txt;." \
   --workpath "$BUILD_DIR_WIN" \
@@ -86,6 +87,7 @@ NodeZilla first-run behavior:
   - assets\components\library\
   - assets\symbols\
   - assets\chips\
+  - Hardware\Cards\
 
 This keeps PL, Library, and Examples accessible outside the app install folder.
 EOF

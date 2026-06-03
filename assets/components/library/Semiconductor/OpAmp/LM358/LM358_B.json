@@ -5,8 +5,7 @@
   "prefix": "U",
   "multipart_family": "LM358",
   "unit_name": "B",
-  "shortcut": "",
-  "spice_type": "X",
+  "spice_type": "x",
   "value_label": "Part Number",
   "show_value": true,
   "default_value": "LM358",
@@ -19,19 +18,19 @@
     {
       "name": "IN2+",
       "pin_number": 5,
-      "x": -45.71428571428571,
-      "y": -15.238095238095237
+      "x": -49.95422083867423,
+      "y": -19.981688335469695
     },
     {
       "name": "IN2-",
       "pin_number": 6,
-      "x": -45.71428571428571,
-      "y": 15.238095238095237
+      "x": -49.95422083867423,
+      "y": 19.981688335469695
     },
     {
       "name": "OUT2",
       "pin_number": 7,
-      "x": 45.71428571428571,
+      "x": 49.95422083867423,
       "y": 0.0
     }
   ]

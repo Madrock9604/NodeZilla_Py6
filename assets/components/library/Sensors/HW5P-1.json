@@ -1,0 +1,39 @@
+{
+  "kind": "HW5P-1",
+  "display_name": "HW5P-1",
+  "category": "Sensors",
+  "prefix": "Q",
+  "multipart_family": "",
+  "unit_name": "",
+  "spice_type": "q",
+  "value_label": "Part Number",
+  "show_value": true,
+  "default_value": "HW5P-1",
+  "type": "component",
+  "net_name": "",
+  "symbol": "custom/HW5P-1.json",
+  "auto_align_terminals": false,
+  "auto_scale_symbol": false,
+  "refdes_pos": [
+    -20.0,
+    -80.0
+  ],
+  "value_pos": [
+    -20.0,
+    60.0
+  ],
+  "ports": [
+    {
+      "name": "P1",
+      "pin_number": null,
+      "x": -80.0,
+      "y": 20.0
+    },
+    {
+      "name": "P2",
+      "pin_number": null,
+      "x": 80.0,
+      "y": 20.0
+    }
+  ]
+}

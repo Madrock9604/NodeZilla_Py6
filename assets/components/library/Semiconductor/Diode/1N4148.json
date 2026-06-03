@@ -1,0 +1,39 @@
+{
+  "kind": "1N4148",
+  "display_name": "1N4148",
+  "category": "Custom",
+  "prefix": "D",
+  "multipart_family": "",
+  "unit_name": "",
+  "spice_type": "d",
+  "value_label": "Part Number",
+  "show_value": true,
+  "default_value": "1N4148",
+  "type": "component",
+  "net_name": "",
+  "symbol": "custom/1N4148.json",
+  "auto_align_terminals": false,
+  "auto_scale_symbol": false,
+  "refdes_pos": [
+    -10.0,
+    -50.0
+  ],
+  "value_pos": [
+    -30.0,
+    30.0
+  ],
+  "ports": [
+    {
+      "name": "P1",
+      "pin_number": null,
+      "x": -60.0,
+      "y": 0.0
+    },
+    {
+      "name": "P2",
+      "pin_number": null,
+      "x": 60.0,
+      "y": 0.0
+    }
+  ]
+}

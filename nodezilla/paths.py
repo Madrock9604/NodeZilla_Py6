@@ -96,7 +96,11 @@ def ensure_user_workspace():
     _copy_missing_tree(b / "assets" / "components" / "library", user_library_root())
     _copy_missing_tree(b / "assets" / "symbols", user_symbols_root())
     _copy_missing_tree(b / "assets" / "chips", user_chips_root())
+    # Support both the newer bundled assets location and the legacy repo
+    # Hardware/Cards layout so packaged builds and source runs can ship the
+    # same starter card templates.
     _copy_missing_tree(b / "assets" / "hardware_cards", user_hardware_cards_dir())
+    _copy_missing_tree(b / "Hardware" / "Cards", user_hardware_cards_dir())
     # Optional app icon used for title-bar/dock/taskbar.
     for icon_name in ("app_icon.png", "app_icon.ico", "app_icon.icns", "icon.png", "icon.ico", "icon.icns"):
         src_icon = b / "assets" / icon_name

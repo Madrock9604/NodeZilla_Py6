@@ -1,0 +1,56 @@
+{
+  "name": "Only Instruments",
+  "description": "Only Instruments",
+  "components": [
+    {
+      "refdes": "XO1",
+      "ports": [
+        3,
+        4
+      ],
+      "value": "",
+      "part": "Oscilloscope"
+    },
+    {
+      "refdes": "XO2",
+      "ports": [
+        5,
+        6
+      ],
+      "value": "",
+      "part": "Oscilloscope"
+    },
+    {
+      "refdes": "*T1",
+      "ports": [
+        7
+      ],
+      "value": "",
+      "part": "Trigger"
+    },
+    {
+      "refdes": "*T2",
+      "ports": [
+        8
+      ],
+      "value": "",
+      "part": "Trigger"
+    },
+    {
+      "refdes": "XW1",
+      "ports": [
+        9
+      ],
+      "value": "",
+      "part": "WaveGenerator"
+    },
+    {
+      "refdes": "XW2",
+      "ports": [
+        10
+      ],
+      "value": "",
+      "part": "WaveGenerator"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "kind": "CD4007_A",
+  "display_name": "CD4007",
+  "category": "Semiconductor / MOSFET / CD4007",
+  "prefix": "Q",
+  "multipart_family": "CD4007",
+  "unit_name": "A",
+  "spice_type": "q",
+  "value_label": "Part Number",
+  "show_value": true,
+  "default_value": "CD4007",
+  "type": "component",
+  "net_name": "",
+  "symbol": "custom/CD4007_A.json",
+  "auto_align_terminals": false,
+  "auto_scale_symbol": false,
+  "ports": [
+    {
+      "name": "P1",
+      "pin_number": 13,
+      "x": 9.95079557954367,
+      "y": -9.96049011417319
+    },
+    {
+      "name": "P2",
+      "pin_number": 8,
+      "x": 9.95079557954367,
+      "y": 9.96049011417319
+    },
+    {
+      "name": "P3",
+      "pin_number": 6,
+      "x": -19.9306747629759,
+      "y": 0.0
+    }
+  ]
+}
