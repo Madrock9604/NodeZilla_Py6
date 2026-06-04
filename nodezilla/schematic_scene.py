@@ -44,6 +44,8 @@ class SchematicScene(QGraphicsScene):
         self._view = None
         self.request_properties = None
         self.request_open_chip = None
+        self.request_open_scope = None
+        self.request_open_wavegen = None
         self.undo_stack = undo_stack
         self._refseq: Dict[str, int] = {}
         self.theme: Theme | None = None

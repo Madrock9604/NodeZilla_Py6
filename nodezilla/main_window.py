@@ -10,7 +10,8 @@ import time
 from PySide6.QtCore import Qt, QEvent, QTimer, QPointF, QSize
 from PySide6.QtGui import QAction, QKeySequence, QUndoStack, QIcon, QColor
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QToolBar, QLabel, QSpinBox,
+    QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QToolBar, QLabel, QSpinBox, QDoubleSpinBox, QSlider, QFrame, QSizePolicy,
     QDockWidget, QStatusBar, QFileDialog, QMessageBox, QDialog, QInputDialog, QTextEdit,
     QComboBox, QPushButton, QToolButton, QScrollArea
 )
@@ -26,7 +27,7 @@ from .theme import ThemeWatcher
 from .component_library import load_component_library
 from .component_panel import ComponentPanel
 from .custom_component_dialog import CustomComponentDialog
-from .instruments_tab import InstrumentTool, ScopePanel, SuppliesPanel, WavegenPanel
+from .instruments_tab import ScopeWindow, WavegenWindow
 from .discovery_backend import make_backend
 from .pl_panel import PlPanel
 from .project_explorer_panel import ProjectExplorerPanel
@@ -213,6 +214,352 @@ class FloatingToolIsland(QWidget):
         super().mouseReleaseEvent(event)
 
 
+class SchematicPowerOverlay(QWidget):
+    """Compact always-visible supply controls and monitor for the schematic view."""
+
+    def __init__(self, backend, parent: QWidget):
+        super().__init__(parent)
+        self.backend = backend
+        self.setObjectName("SchematicPowerOverlay")
+        self.setAttribute(Qt.WA_StyledBackground, False)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self._theme_is_dark = True
+        self._managed_by_layout = False
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        self.controls = QFrame(self)
+        self.controls.setObjectName("PowerControlsOverlay")
+        ctrl = QGridLayout(self.controls)
+        ctrl.setContentsMargins(6, 3, 6, 3)
+        ctrl.setHorizontalSpacing(4)
+        ctrl.setVerticalSpacing(4)
+
+        self.master = QToolButton()
+        self.master.setText("Master")
+        self.master.setCheckable(True)
+        self.master.setFixedWidth(68)
+
+        self.v_pos = QDoubleSpinBox()
+        self.v_pos.setRange(0.0, 5.0)
+        self.v_pos.setDecimals(3)
+        self.v_pos.setSingleStep(0.1)
+        self.v_pos.setValue(1.0)
+        self.v_pos.setSuffix(" V")
+        self.v_pos.setFixedWidth(82)
+        self.v_pos_slider = QSlider(Qt.Horizontal)
+        self.v_pos_slider.setRange(0, 5000)
+        self.v_pos_slider.setValue(1000)
+        self.v_pos_slider.setFixedWidth(86)
+
+        self.v_neg = QDoubleSpinBox()
+        self.v_neg.setRange(-5.0, 0.0)
+        self.v_neg.setDecimals(3)
+        self.v_neg.setSingleStep(0.1)
+        self.v_neg.setValue(-1.0)
+        self.v_neg.setSuffix(" V")
+        self.v_neg.setFixedWidth(82)
+        self.v_neg_slider = QSlider(Qt.Horizontal)
+        self.v_neg_slider.setRange(0, 5000)
+        self.v_neg_slider.setValue(1000)
+        self.v_neg_slider.setFixedWidth(86)
+
+        ctrl.addWidget(self.master, 0, 0)
+        ctrl.addWidget(QLabel("V+"), 0, 1)
+        ctrl.addWidget(self.v_pos, 0, 2)
+        ctrl.addWidget(self.v_pos_slider, 0, 3)
+        ctrl.addWidget(QLabel("V-"), 0, 4)
+        ctrl.addWidget(self.v_neg, 0, 5)
+        ctrl.addWidget(self.v_neg_slider, 0, 6)
+        self.controls.setMinimumSize(self.controls.sizeHint())
+        root.addWidget(self.controls)
+
+        self.monitor = QFrame(self)
+        self.monitor.setObjectName("PowerMonitorOverlay")
+        mon = QGridLayout(self.monitor)
+        mon.setContentsMargins(8, 5, 8, 5)
+        mon.setHorizontalSpacing(8)
+        mon.setVerticalSpacing(3)
+        self.m_vp = self._metric("--")
+        self.m_vn = self._metric("--")
+        self.m_usb_v = self._metric("--")
+        self.m_usb_i = self._metric("--")
+        self.m_aux_v = self._metric("--")
+        self.m_aux_i = self._metric("--")
+        for col, (name, lbl) in enumerate(
+            (
+                ("V+", self.m_vp),
+                ("V-", self.m_vn),
+                ("USB V", self.m_usb_v),
+                ("USB I", self.m_usb_i),
+                ("AUX V", self.m_aux_v),
+                ("AUX I", self.m_aux_i),
+            )
+        ):
+            mon.addWidget(QLabel(name), 0, col * 2)
+            mon.addWidget(lbl, 0, col * 2 + 1)
+        self.monitor.setMinimumSize(self.monitor.sizeHint())
+        root.addWidget(self.monitor)
+        self.controls.setParent(parent)
+        self.monitor.setParent(parent)
+
+        self._apply_timer = QTimer(self)
+        self._apply_timer.setSingleShot(True)
+        self._apply_timer.setInterval(200)
+        self._apply_timer.timeout.connect(lambda: self._apply_config(quiet=True))
+        self._poll_timer = QTimer(self)
+        self._poll_timer.setInterval(500)
+        self._poll_timer.timeout.connect(self.refresh_status)
+
+        self.master.toggled.connect(self._on_master_toggled)
+        self.v_pos_slider.valueChanged.connect(lambda v: self.v_pos.setValue(float(v) / 1000.0))
+        self.v_neg_slider.valueChanged.connect(lambda v: self.v_neg.setValue(-float(v) / 1000.0))
+        self.v_pos.valueChanged.connect(lambda v: self._sync_slider(self.v_pos_slider, v))
+        self.v_neg.valueChanged.connect(lambda v: self._sync_slider(self.v_neg_slider, -v))
+        self.v_pos.valueChanged.connect(self._schedule_apply)
+        self.v_neg.valueChanged.connect(self._schedule_apply)
+
+        self.apply_theme(None)
+        self.sync_from_backend()
+        self.refresh_status()
+        self._poll_timer.start()
+        self.setGeometry(0, 0, 0, 0)
+        parent.installEventFilter(self)
+        QTimer.singleShot(0, self.reposition)
+
+    def _metric(self, text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setAlignment(Qt.AlignCenter)
+        lbl.setMinimumWidth(58)
+        return lbl
+
+    def _sync_slider(self, slider: QSlider, value_v: float):
+        value = int(round(float(value_v) * 1000.0))
+        if slider.value() == value:
+            return
+        slider.blockSignals(True)
+        slider.setValue(value)
+        slider.blockSignals(False)
+
+    def _params(self) -> dict:
+        return {
+            "master_enabled": bool(self.master.isChecked()),
+            "v_pos_v": float(self.v_pos.value()),
+            "v_neg_v": float(self.v_neg.value()),
+            "tracking": False,
+            "power_limit_w": 2.5,
+        }
+
+    def _schedule_apply(self, *_args):
+        self._apply_timer.start()
+
+    def _on_master_toggled(self, checked: bool):
+        self._apply_timer.stop()
+        self._apply_config(quiet=True)
+        self._style_master(bool(checked))
+
+    def _apply_config(self, quiet: bool = False):
+        ok, _msg = self.backend.configure_supplies(**self._params())
+        self._style_master(bool(self.master.isChecked()))
+        self.refresh_status()
+        return ok
+
+    def refresh_status(self):
+        ok, _msg, st = self.backend.read_supplies_status()
+        if not ok:
+            return
+        self.m_vp.setText(f"{float(st.get('v_pos_meas_v', 0.0)):+.3f} V")
+        self.m_vn.setText(f"{float(st.get('v_neg_meas_v', 0.0)):+.3f} V")
+        self.m_usb_v.setText(f"{float(st.get('usb_voltage_v', 0.0)):.3f} V")
+        self.m_usb_i.setText(f"{float(st.get('usb_current_a', 0.0)) * 1e3:.1f} mA")
+        self.m_aux_v.setText(f"{float(st.get('aux_voltage_v', 0.0)):.3f} V")
+        self.m_aux_i.setText(f"{float(st.get('aux_current_a', 0.0)) * 1e3:.1f} mA")
+        self._style_master(bool(self.master.isChecked()))
+        self._style_rail_slider(
+            self.v_pos_slider,
+            target_v=float(self.v_pos.value()),
+            measured_v=float(st.get("v_pos_meas_v", 0.0)),
+            master_on=bool(self.master.isChecked()),
+        )
+        self._style_rail_slider(
+            self.v_neg_slider,
+            target_v=float(self.v_neg.value()),
+            measured_v=float(st.get("v_neg_meas_v", 0.0)),
+            master_on=bool(self.master.isChecked()),
+        )
+
+    def sync_from_backend(self):
+        ok, _msg, st = self.backend.read_supplies_status()
+        if not ok:
+            return
+        for widget in (self.master, self.v_pos, self.v_neg):
+            widget.blockSignals(True)
+        try:
+            self.master.setChecked(bool(st.get("master_enabled", False)))
+            self.v_pos.setValue(float(st.get("v_pos_v", self.v_pos.value())))
+            self.v_neg.setValue(float(st.get("v_neg_v", self.v_neg.value())))
+            self._sync_slider(self.v_pos_slider, float(self.v_pos.value()))
+            self._sync_slider(self.v_neg_slider, -float(self.v_neg.value()))
+        finally:
+            for widget in (self.master, self.v_pos, self.v_neg):
+                widget.blockSignals(False)
+        self.refresh_status()
+
+    def on_connection_changed(self):
+        self.sync_from_backend()
+        self.refresh_status()
+
+    def shutdown(self):
+        self._poll_timer.stop()
+        self._apply_timer.stop()
+
+    def reposition(self):
+        if self._managed_by_layout:
+            return
+        p = self.parentWidget()
+        if p is None:
+            return
+        margin = 8
+        self.controls.adjustSize()
+        self.monitor.adjustSize()
+        self.adjustSize()
+        ctrl_w = self.controls.sizeHint().width()
+        ctrl_h = self.controls.sizeHint().height()
+        mon_w = self.monitor.sizeHint().width()
+        mon_h = self.monitor.sizeHint().height()
+        toolbar = getattr(p, "_hardware_toolbar", None)
+        if toolbar is not None and toolbar.isVisible():
+            tgeo = toolbar.geometry()
+            top_y = tgeo.y() + max(0, int((tgeo.height() - ctrl_h) / 2))
+        else:
+            top_y = margin
+        status = p.statusBar() if hasattr(p, "statusBar") else None
+        if status is not None and status.isVisible():
+            sgeo = status.geometry()
+            bottom_y = min(
+                sgeo.y() + max(0, int((sgeo.height() - mon_h) / 2)),
+                max(margin, p.height() - mon_h - 2),
+            )
+        else:
+            bottom_y = max(margin, p.height() - mon_h - margin)
+        self.controls.setGeometry(max(margin, p.width() - ctrl_w - margin), top_y, ctrl_w, ctrl_h)
+        self.monitor.setGeometry(max(margin, p.width() - mon_w - margin), bottom_y, mon_w, mon_h)
+        self.controls.raise_()
+        self.monitor.raise_()
+
+    def eventFilter(self, obj, event):
+        if obj is self.parentWidget() and event.type() in (QEvent.Resize, QEvent.Show):
+            QTimer.singleShot(0, self.reposition)
+        return super().eventFilter(obj, event)
+
+    def _style_master(self, enabled: bool):
+        if enabled:
+            bg = "#1f6f3f" if self._theme_is_dark else "#ccefd7"
+            fg = "#e9fff0" if self._theme_is_dark else "#143e22"
+            border = "#46a765"
+            padding = "5px 7px 3px 9px"
+            inset = "border-top-color: #123d22; border-left-color: #123d22;"
+        else:
+            bg = "#4a3030" if self._theme_is_dark else "#f1d0d0"
+            fg = "#ffe8e8" if self._theme_is_dark else "#5e2222"
+            border = "#875353"
+            padding = "4px 8px"
+            inset = ""
+        self.master.setStyleSheet(
+            f"QToolButton {{ background: {bg}; color: {fg}; border: 1px solid {border}; "
+            f"border-radius: 3px; padding: {padding}; font-weight: 700; {inset} }}"
+            "QToolButton:pressed { padding: 5px 7px 3px 9px; "
+            "border-top-color: #123d22; border-left-color: #123d22; }"
+        )
+
+    def _style_rail_slider(self, slider: QSlider, target_v: float, measured_v: float, master_on: bool):
+        target_abs = abs(float(target_v))
+        error = abs(float(target_v) - float(measured_v))
+        if not master_on or target_abs <= 0.01:
+            rail = "#5b5d66" if self._theme_is_dark else "#b8bec8"
+            handle = "#8b8e98" if self._theme_is_dark else "#747b86"
+        elif error <= max(0.05, target_abs * 0.04):
+            rail = "#1fa64a" if self._theme_is_dark else "#48b96a"
+            handle = "#8df0a4" if self._theme_is_dark else "#256f3b"
+        else:
+            rail = "#b88622" if self._theme_is_dark else "#d39a26"
+            handle = "#ffd26a" if self._theme_is_dark else "#805a11"
+        slider.setStyleSheet(
+            f"""
+            QSlider::groove:horizontal {{
+                height: 4px;
+                background: {rail};
+                border-radius: 2px;
+            }}
+            QSlider::sub-page:horizontal {{
+                background: {rail};
+                border-radius: 2px;
+            }}
+            QSlider::add-page:horizontal {{
+                background: rgba(90, 92, 100, 0.45);
+                border-radius: 2px;
+            }}
+            QSlider::handle:horizontal {{
+                background: {handle};
+                border: 1px solid {rail};
+                width: 16px;
+                margin: -6px 0;
+                border-radius: 8px;
+            }}
+            """
+        )
+
+    def apply_theme(self, theme):
+        self._theme_is_dark = bool(getattr(theme, "name", "dark") == "dark")
+        if self._theme_is_dark:
+            panel_bg = "rgba(40,40,44,215)"
+            border = "#696a72"
+            fg = "#eeeeee"
+            metric_bg = "#17181c"
+            metric_border = "#30323a"
+        else:
+            panel_bg = "rgba(246,247,249,232)"
+            border = "#aeb4bf"
+            fg = "#252a33"
+            metric_bg = "#ffffff"
+            metric_border = "#c8ced8"
+        self.setStyleSheet(
+            f"""
+            QFrame#PowerControlsOverlay,
+            QFrame#PowerMonitorOverlay {{
+                background: {panel_bg};
+                border: 1px solid {border};
+                border-radius: 6px;
+            }}
+            QLabel {{
+                color: {fg};
+                font-weight: 600;
+            }}
+            QLabel#PowerMetric {{
+                background: {metric_bg};
+                border: 1px solid {metric_border};
+                border-radius: 3px;
+                padding: 2px 6px;
+                font-weight: 500;
+            }}
+            QDoubleSpinBox {{
+                background: {metric_bg};
+                color: {fg};
+                border: 1px solid {metric_border};
+                min-height: 22px;
+            }}
+            """
+        )
+        for lbl in (self.m_vp, self.m_vn, self.m_usb_v, self.m_usb_i, self.m_aux_v, self.m_aux_i):
+            lbl.setObjectName("PowerMetric")
+            lbl.style().unpolish(lbl)
+            lbl.style().polish(lbl)
+        self._style_master(bool(self.master.isChecked()))
+        self.refresh_status()
+
+
 class MainWindow(QMainWindow):
     """Application shell wiring scene, docks, menus, and file operations."""
     def __init__(self):
@@ -228,6 +575,7 @@ class MainWindow(QMainWindow):
         self._paste_serial: int = 0
         self._pending_pl_component_id: str | None = None
         self._pending_pl_source_id: int = -1
+        self._is_closing = False
 
         self.tabs = QTabWidget()
         self.status_label = QLabel("Ready")
@@ -240,33 +588,42 @@ class MainWindow(QMainWindow):
         self._active_scene = self.schematic_tab.scene
         self._active_view = self.schematic_tab.view
         self._chip_editors: list[ChipEditorDialog] = []
+        self._scope_window: ScopeWindow | None = None
+        self._wavegen_windows: dict[int, WavegenWindow] = {}
+        self._wavegen_state = {
+            1: {
+                "enabled": False,
+                "waveform": "sine",
+                "frequency_hz": 1000.0,
+                "amplitude_v": 1.0,
+                "offset_v": 0.0,
+                "symmetry_pct": 50.0,
+                "phase_deg": 0.0,
+            },
+            2: {
+                "enabled": False,
+                "waveform": "sine",
+                "frequency_hz": 1000.0,
+                "amplitude_v": 1.0,
+                "offset_v": 0.0,
+                "symmetry_pct": 50.0,
+                "phase_deg": 0.0,
+            },
+        }
         self.component_library = load_component_library()
         theme = self._watcher.current_theme()
         self._apply_theme(theme)
-        self.instruments_tab = QMainWindow()
-        self.instruments_tab.setDockNestingEnabled(True)
-        self.instruments_tab.setDockOptions(
-            QMainWindow.AnimatedDocks
-            | QMainWindow.AllowNestedDocks
-            | QMainWindow.AllowTabbedDocks
-        )
-        # Keep an empty central host so Qt shows full edge docking guides
-        # (left/right/top/bottom), without a visible placeholder panel.
-        inst_center = QWidget()
-        inst_center.setObjectName("InstrumentsCenterHost")
-        inst_center.setStyleSheet("#InstrumentsCenterHost { background: transparent; }")
-        # Collapse center host so docked tools use the full available canvas.
-        inst_center.setMinimumSize(0, 0)
-        inst_center.setMaximumSize(0, 0)
-        self.instruments_tab.setCentralWidget(inst_center)
         self.hardware_builder_tab = QWidget()
         self.hardware_builder_tab_layout = QVBoxLayout(self.hardware_builder_tab)
         self.hardware_builder_tab_layout.setContentsMargins(0, 0, 0, 0)
         self.tabs.addTab(self.schematic_tab, "Schematic")
-        self.tabs.addTab(self.instruments_tab, "Instruments")
         self.tabs.addTab(self.hardware_builder_tab, "Hardware Configuration")
         self.setCentralWidget(self.tabs)
         self._build_hardware_toolbar()
+        sb = QStatusBar()
+        sb.addWidget(self.hw_status)
+        sb.addWidget(self.status_label)
+        self.setStatusBar(sb)
 
         self.props_panel = PropertiesPanel()
         self.props_panel.set_callbacks(self._apply_properties)
@@ -338,13 +695,15 @@ class MainWindow(QMainWindow):
 
         self.schematic_tab.scene.request_properties = self._show_properties_for
         self.schematic_tab.scene.request_open_chip = self._open_chip_editor_for_component
+        self.schematic_tab.scene.request_open_scope = self._open_scope_window_for_component
+        self.schematic_tab.scene.request_open_wavegen = self._open_wavegen_window_for_component
         self.schematic_tab.scene.selectionChanged.connect(self._on_selection_changed)
         self.schematic_tab.scene.component_placed.connect(self._on_component_placed)
         self.schematic_tab.view.viewport().installEventFilter(self)
 
         self._build_toolbar()
         self._build_schematic_island()
-        self._build_instrument_docks()
+        self._build_schematic_power_overlay()
         self._build_menu()
         self._build_schematic_shortcuts()
 
@@ -355,11 +714,8 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.project_explorer_dock.toggleViewAction())
         view_menu.addAction(self.live_netlist_dock.toggleViewAction())
         view_menu.addAction(self.pl_dock.toggleViewAction())
-        view_menu.addAction(self.scope_dock.toggleViewAction())
-        view_menu.addAction(self.wavegen_dock.toggleViewAction())
-        view_menu.addAction(self.supplies_dock.toggleViewAction())
 
-        # Keep schematic-only docks hidden when Instruments tab is active.
+        # Keep schematic-only docks hidden outside the Schematic tab.
         self._schematic_dock_visibility = {
             "props": self.props_dock.isVisible(),
             "nets": self.nets_dock.isVisible(),
@@ -386,9 +742,6 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(undo_act)
         edit_menu.addAction(redo_act)
 
-        sb = QStatusBar()
-        sb.addWidget(self.status_label)
-        self.setStatusBar(sb)
         self._install_component_shortcuts()
 
 
@@ -414,6 +767,8 @@ class MainWindow(QMainWindow):
             self.schematic_tab.scene.apply_theme(theme)
             if hasattr(self, "_schematic_island") and self._schematic_island is not None:
                 self._schematic_island.apply_theme(theme)
+            if hasattr(self, "_schematic_power_overlay") and self._schematic_power_overlay is not None:
+                self._schematic_power_overlay.apply_theme(theme)
             for panel_attr in ("scope_panel", "wavegen_panel", "supplies_panel"):
                 panel = getattr(self, panel_attr, None)
                 if panel is not None and hasattr(panel, "apply_theme"):
@@ -421,6 +776,18 @@ class MainWindow(QMainWindow):
                         panel.apply_theme(theme)
                     except Exception:
                         pass
+            scope_window = getattr(self, "_scope_window", None)
+            if scope_window is not None and scope_window.isVisible():
+                try:
+                    scope_window.apply_theme(theme)
+                except Exception:
+                    pass
+            for wavegen_window in list(getattr(self, "_wavegen_windows", {}).values()):
+                try:
+                    if wavegen_window is not None and wavegen_window.isVisible():
+                        wavegen_window.apply_theme(theme)
+                except Exception:
+                    pass
             for dlg in list(getattr(self, "_chip_editors", [])):
                 try:
                     if dlg is not None and dlg.isVisible():
@@ -464,17 +831,17 @@ class MainWindow(QMainWindow):
             self._island_grid_spin.blockSignals(False)
 
     def _on_tab_changed(self, index: int):
-        """Show schematic docks only on the Schematic tab.
-
-        Preserve user visibility choices when returning from Instruments.
-        """
+        """Show schematic docks only on the Schematic tab."""
         current = self.tabs.widget(index)
         on_schematic = current is self.schematic_tab
-        on_instruments = current is self.instruments_tab
         if hasattr(self, "_schematic_toolbar") and self._schematic_toolbar is not None:
             self._schematic_toolbar.setVisible(False)
         if hasattr(self, "_schematic_island") and self._schematic_island is not None:
             self._schematic_island.setVisible(on_schematic)
+        if hasattr(self, "_schematic_power_overlay") and self._schematic_power_overlay is not None:
+            self._schematic_power_overlay.controls.setVisible(True)
+            self._schematic_power_overlay.monitor.setVisible(True)
+            self._schematic_power_overlay.reposition()
         if on_schematic:
             self._sync_grid_controls_from_scene(self._scene_for_controls())
             if self._schematic_dock_visibility.get("props", True):
@@ -501,9 +868,6 @@ class MainWindow(QMainWindow):
                 self.pl_dock.show()
             else:
                 self.pl_dock.hide()
-            self.scope_dock.hide()
-            self.wavegen_dock.hide()
-            self.supplies_dock.hide()
             QTimer.singleShot(0, self._fit_window_to_screen)
             return
 
@@ -520,18 +884,18 @@ class MainWindow(QMainWindow):
         self.project_explorer_dock.hide()
         self.live_netlist_dock.hide()
         self.pl_dock.hide()
-        self.scope_dock.hide()
-        self.wavegen_dock.hide()
-        self.supplies_dock.hide()
-        if on_instruments:
-            self._apply_default_instrument_layout()
         QTimer.singleShot(0, self._fit_window_to_screen)
         QTimer.singleShot(120, self._fit_window_to_screen)
 
     # selection → props
     def _on_selection_changed(self):
         """Push active selection into the properties panel."""
-        selected = self._scene_for_controls().selectedItems()
+        if getattr(self, "_is_closing", False):
+            return
+        try:
+            selected = self._scene_for_controls().selectedItems()
+        except RuntimeError:
+            return
         texts = [it for it in selected if isinstance(it, CommentTextItem)]
         if texts:
             self.props_panel.show_text(texts[0])
@@ -616,6 +980,8 @@ class MainWindow(QMainWindow):
         dlg = ChipEditorDialog(comp, self)
         dlg.scene.request_properties = self._show_properties_for
         dlg.scene.request_open_chip = self._open_chip_editor_for_component
+        dlg.scene.request_open_scope = self._open_scope_window_for_component
+        dlg.scene.request_open_wavegen = self._open_wavegen_window_for_component
         dlg.scene.selectionChanged.connect(self._on_selection_changed)
         dlg.activated.connect(self._set_active_schematic_context)
         dlg.closed.connect(self._on_chip_editor_closed)
@@ -623,6 +989,53 @@ class MainWindow(QMainWindow):
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
+
+    def _open_scope_window_for_component(self, comp: ComponentItem):
+        ref = (getattr(comp, "refdes", "") or getattr(comp, "value", "") or "Scope").strip()
+        if self._scope_window is None:
+            self._scope_window = ScopeWindow(self.backend, self, "Oscilloscope")
+            self._scope_window.destroyed.connect(lambda *_: setattr(self, "_scope_window", None))
+            try:
+                self._scope_window.apply_theme(self._watcher.current_theme())
+            except Exception:
+                pass
+        self._scope_window.setWindowTitle(f"Oscilloscope - {ref}")
+        self._scope_window.show()
+        self._scope_window.raise_()
+        self._scope_window.activateWindow()
+
+    def _wavegen_channel_for_component(self, comp: ComponentItem) -> int:
+        ref = (getattr(comp, "refdes", "") or "").strip().upper()
+        digits = "".join(ch for ch in ref if ch.isdigit())
+        if digits:
+            try:
+                return 2 if int(digits) == 2 else 1
+            except Exception:
+                pass
+        return 1
+
+    def _open_wavegen_window_for_component(self, comp: ComponentItem):
+        ref = (getattr(comp, "refdes", "") or getattr(comp, "value", "") or "Wavegen").strip()
+        channel = self._wavegen_channel_for_component(comp)
+        window = self._wavegen_windows.get(channel)
+        if window is None:
+            window = WavegenWindow(
+                self.backend,
+                channel=channel,
+                shared_state=self._wavegen_state,
+                parent=self,
+                title=f"Wave Generator - W{channel}",
+            )
+            self._wavegen_windows[channel] = window
+            window.destroyed.connect(lambda *_args, ch=channel: self._wavegen_windows.pop(ch, None))
+            try:
+                window.apply_theme(self._watcher.current_theme())
+            except Exception:
+                pass
+        window.setWindowTitle(f"Wave Generator - {ref}")
+        window.show()
+        window.raise_()
+        window.activateWindow()
 
     def _on_chip_editor_closed(self, dlg):
         self._chip_editors = [d for d in self._chip_editors if d is not dlg]
@@ -882,8 +1295,6 @@ class MainWindow(QMainWindow):
         self.hw_disconnect_btn.setEnabled(False)
         self.hw_backend = QLabel(f"Backend: {self.backend.backend_name()}")
 
-        tb.addWidget(self.hw_status)
-        tb.addSeparator()
         tb.addWidget(QLabel("Device"))
         tb.addWidget(self.hw_devices)
         tb.addWidget(self.hw_refresh_btn)
@@ -944,9 +1355,17 @@ class MainWindow(QMainWindow):
 
     def _on_backend_connection_changed(self, _connected: bool, message: str):
         self.hw_status.setText(f"Hardware: {message}")
-        for p in (self.scope_panel, self.wavegen_panel, self.supplies_panel):
+        for p in (
+            getattr(self, "scope_panel", None),
+            getattr(self, "wavegen_panel", None),
+            getattr(self, "supplies_panel", None),
+        ):
+            if p is None:
+                continue
             if hasattr(p, "on_connection_changed"):
                 p.on_connection_changed()
+        if hasattr(self, "_schematic_power_overlay") and self._schematic_power_overlay is not None:
+            self._schematic_power_overlay.on_connection_changed()
         if _connected:
             # Do not auto-enable supplies on connect; user controls master power.
             self._sync_supplies_docks()
@@ -956,9 +1375,16 @@ class MainWindow(QMainWindow):
         if hasattr(self, "supplies_panel") and self.supplies_panel is not None:
             if hasattr(self.supplies_panel, "sync_from_backend"):
                 self.supplies_panel.sync_from_backend()
+        if hasattr(self, "_schematic_power_overlay") and self._schematic_power_overlay is not None:
+            self._schematic_power_overlay.sync_from_backend()
 
     def _shutdown_instrument_panels(self):
-        for p in (getattr(self, "scope_panel", None), getattr(self, "wavegen_panel", None), getattr(self, "supplies_panel", None)):
+        for p in (
+            getattr(self, "scope_panel", None),
+            getattr(self, "wavegen_panel", None),
+            getattr(self, "supplies_panel", None),
+            getattr(self, "_schematic_power_overlay", None),
+        ):
             if p is None:
                 continue
             if hasattr(p, "shutdown"):
@@ -987,69 +1413,6 @@ class MainWindow(QMainWindow):
             )
             self.addAction(act)
             self._component_shortcut_actions.append(act)
-
-    def _build_instrument_docks(self):
-        """Create dockable instrument panels (Wavegen/Scope/Supplies)."""
-        scope_tool = InstrumentTool("scope", "Scope", "Capture and inspect analog waveforms.")
-        wavegen_tool = InstrumentTool("wavegen", "Wavegen", "Generate analog stimulus signals.")
-        supplies_tool = InstrumentTool("supplies", "Supplies", "Control programmable power rails.")
-
-        self.scope_panel = ScopePanel(scope_tool, self.backend)
-        self.wavegen_panel = WavegenPanel(wavegen_tool, self.backend)
-        self.supplies_panel = SuppliesPanel(supplies_tool, self.backend)
-
-        self.scope_dock = QDockWidget("Scope", self)
-        self.scope_dock.setObjectName("ScopeDock")
-        scope_scroll = QScrollArea()
-        scope_scroll.setWidgetResizable(True)
-        scope_scroll.setFrameShape(QScrollArea.NoFrame)
-        scope_scroll.setWidget(self.scope_panel)
-        self.scope_dock.setWidget(scope_scroll)
-        self.scope_dock.setAllowedAreas(
-            Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea | Qt.TopDockWidgetArea
-        )
-        self.scope_dock.setFeatures(
-            QDockWidget.DockWidgetMovable
-            | QDockWidget.DockWidgetFloatable
-        )
-        self.scope_dock.setMinimumSize(0, 0)
-
-        self.wavegen_dock = QDockWidget("Wavegen", self)
-        self.wavegen_dock.setObjectName("WavegenDock")
-        wavegen_scroll = QScrollArea()
-        wavegen_scroll.setWidgetResizable(True)
-        wavegen_scroll.setFrameShape(QScrollArea.NoFrame)
-        wavegen_scroll.setWidget(self.wavegen_panel)
-        self.wavegen_dock.setWidget(wavegen_scroll)
-        self.wavegen_dock.setAllowedAreas(
-            Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea | Qt.TopDockWidgetArea
-        )
-        self.wavegen_dock.setFeatures(
-            QDockWidget.DockWidgetMovable
-            | QDockWidget.DockWidgetFloatable
-        )
-        self.wavegen_dock.setMinimumSize(0, 0)
-
-        self.supplies_dock = QDockWidget("Supplies", self)
-        self.supplies_dock.setObjectName("SuppliesDock")
-        supplies_scroll = QScrollArea()
-        supplies_scroll.setWidgetResizable(True)
-        supplies_scroll.setFrameShape(QScrollArea.NoFrame)
-        supplies_scroll.setWidget(self.supplies_panel)
-        self.supplies_dock.setWidget(supplies_scroll)
-        self.supplies_dock.setAllowedAreas(
-            Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea | Qt.TopDockWidgetArea
-        )
-        self.supplies_dock.setFeatures(
-            QDockWidget.DockWidgetMovable
-            | QDockWidget.DockWidgetFloatable
-        )
-        self.supplies_dock.setMinimumSize(0, 0)
-        self._apply_default_instrument_layout()
-        try:
-            self._apply_theme(self._watcher.current_theme())
-        except Exception:
-            pass
 
     def _available_screen_rect(self):
         screen = self.windowHandle().screen() if self.windowHandle() is not None else None
@@ -1103,64 +1466,6 @@ class MainWindow(QMainWindow):
         if not self._did_initial_screen_fit:
             self._fit_window_to_screen()
             self._did_initial_screen_fit = True
-
-    def _apply_default_instrument_layout(self):
-        """Force default instruments layout:
-        scope top, wavegen+supplies bottom split.
-        """
-        for d in (self.scope_dock, self.wavegen_dock, self.supplies_dock):
-            if d.isFloating():
-                d.setFloating(False)
-        self.instruments_tab.addDockWidget(Qt.TopDockWidgetArea, self.scope_dock)
-        self.instruments_tab.addDockWidget(Qt.BottomDockWidgetArea, self.wavegen_dock)
-        self.instruments_tab.addDockWidget(Qt.BottomDockWidgetArea, self.supplies_dock)
-        self.instruments_tab.splitDockWidget(self.wavegen_dock, self.supplies_dock, Qt.Horizontal)
-        self.scope_dock.show()
-        self.wavegen_dock.show()
-        self.supplies_dock.show()
-        preset = self._instrument_layout_preset()
-        # Proportional sizing: scope gets more vertical space.
-        self.instruments_tab.resizeDocks(
-            [self.scope_dock, self.wavegen_dock],
-            [int(preset["v_top"]), int(preset["v_bottom"])],
-            Qt.Vertical,
-        )
-        # Bottom split: wavegen and supplies proportional by preset.
-        self.instruments_tab.resizeDocks(
-            [self.wavegen_dock, self.supplies_dock],
-            [int(preset["h_left"]), int(preset["h_right"])],
-            Qt.Horizontal,
-        )
-        self.scope_dock.raise_()
-
-    def _instrument_layout_preset(self) -> dict:
-        """Return dock-size preset tuned for current window size."""
-        w = max(1, int(self.instruments_tab.width()))
-        h = max(1, int(self.instruments_tab.height()))
-        area = w * h
-        # Small screens / compact windows.
-        if w < 1300 or h < 760 or area < 900_000:
-            return {
-                "v_top": max(240, int(h * 0.58)),
-                "v_bottom": max(180, int(h * 0.42)),
-                "h_left": max(260, int(w * 0.55)),
-                "h_right": max(220, int(w * 0.45)),
-            }
-        # Large monitors.
-        if w > 2200 or h > 1300 or area > 2_600_000:
-            return {
-                "v_top": max(340, int(h * 0.66)),
-                "v_bottom": max(230, int(h * 0.34)),
-                "h_left": max(420, int(w * 0.60)),
-                "h_right": max(320, int(w * 0.40)),
-            }
-        # Medium default.
-        return {
-            "v_top": max(300, int(h * 0.63)),
-            "v_bottom": max(210, int(h * 0.37)),
-            "h_left": max(340, int(w * 0.58)),
-            "h_right": max(280, int(w * 0.42)),
-        }
 
     def _handle_component_shortcut(self, kind: str, shortcut: str):
         """Resolve conflicts between placement hotkeys and component shortcuts."""
@@ -1366,6 +1671,22 @@ class MainWindow(QMainWindow):
         self.schematic_tab.view.verticalScrollBar().valueChanged.connect(
             lambda _v: island.reset_default_geometry()
         )
+
+    def _build_schematic_power_overlay(self):
+        """Create compact power controls in the window chrome."""
+        self._schematic_power_overlay = SchematicPowerOverlay(self.backend, self)
+        self._schematic_power_overlay._managed_by_layout = True
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self._hardware_toolbar.addWidget(spacer)
+        self._hardware_toolbar.addWidget(self._schematic_power_overlay.controls)
+        self.statusBar().addPermanentWidget(self._schematic_power_overlay.monitor)
+        try:
+            self._schematic_power_overlay.apply_theme(self._watcher.current_theme())
+        except Exception:
+            pass
+        self._schematic_power_overlay.controls.show()
+        self._schematic_power_overlay.monitor.show()
 
     def _build_menu(self):
         """Create file menu actions (new/open/save/export/custom parts)."""
@@ -2069,10 +2390,28 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Graceful app shutdown: stop instruments, disconnect hardware, clean temp files."""
+        self._is_closing = True
+        try:
+            if getattr(self, "net_panel", None) is not None:
+                self.net_panel.set_scene(None)
+        except Exception:
+            pass
         try:
             self._shutdown_instrument_panels()
         except Exception:
             # Best-effort shutdown; never block close.
+            pass
+        try:
+            if self._scope_window is not None:
+                self._scope_window.close()
+        except Exception:
+            pass
+        try:
+            for window in list(getattr(self, "_wavegen_windows", {}).values()):
+                if window is not None:
+                    window.close()
+            self._wavegen_windows.clear()
+        except Exception:
             pass
 
         tmp_path = (self.runtime_spice_netlist_path or "").strip()

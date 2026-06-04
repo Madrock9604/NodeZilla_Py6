@@ -482,6 +482,30 @@ class ComponentItem(QGraphicsRectItem):
     def is_chip(self) -> bool:
         return bool(self._is_chip)
 
+    def is_oscilloscope(self) -> bool:
+        comp_def = getattr(self, "_comp_def", None)
+        fields = [
+            self.kind,
+            self.value,
+            self.refdes,
+            getattr(comp_def, "kind", ""),
+            getattr(comp_def, "display_name", ""),
+        ]
+        text = " ".join(str(v or "").lower() for v in fields)
+        return "oscilloscope" in text or "oscope" in text
+
+    def is_wave_generator(self) -> bool:
+        comp_def = getattr(self, "_comp_def", None)
+        fields = [
+            self.kind,
+            self.value,
+            self.refdes,
+            getattr(comp_def, "kind", ""),
+            getattr(comp_def, "display_name", ""),
+        ]
+        text = " ".join(str(v or "").lower() for v in fields)
+        return "wavegenerator" in text or "wave generator" in text or "wavegen" in text
+
     def chip_data(self) -> dict:
         try:
             return json.loads(json.dumps(self._chip_data or {}))
@@ -889,6 +913,14 @@ class ComponentItem(QGraphicsRectItem):
 
     def mouseDoubleClickEvent(self, e):  # open Properties on double-click
         sc = self.scene()
+        if self.is_oscilloscope() and sc and getattr(sc, "request_open_scope", None):
+            sc.request_open_scope(self)
+            e.accept()
+            return
+        if self.is_wave_generator() and sc and getattr(sc, "request_open_wavegen", None):
+            sc.request_open_wavegen(self)
+            e.accept()
+            return
         if self.is_chip() and sc and getattr(sc, "request_open_chip", None):
             sc.request_open_chip(self)
             e.accept()

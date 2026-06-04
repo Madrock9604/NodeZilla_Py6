@@ -45,6 +45,15 @@ class NetPanel(QWidget):
 
     def set_scene(self, scene):
         """Attach to a scene and subscribe to net/selection change signals."""
+        if self._scene is not None:
+            try:
+                self._scene.nets_changed.disconnect(self._schedule_refresh)
+            except Exception:
+                pass
+            try:
+                self._scene.selectionChanged.disconnect(self._sync_selection_from_scene)
+            except Exception:
+                pass
         self._scene = scene
         if scene is not None:
             scene.nets_changed.connect(self._schedule_refresh)
@@ -128,7 +137,11 @@ class NetPanel(QWidget):
             return
         if self._ignore_scene_clear:
             return
-        selected = self._scene.selectedItems()
+        try:
+            selected = self._scene.selectedItems()
+        except RuntimeError:
+            self._scene = None
+            return
         if not selected:
             self._clear_selection()
             return

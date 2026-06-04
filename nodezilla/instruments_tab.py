@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ast
 import math
+import random
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
@@ -10,6 +12,8 @@ from PySide6.QtWidgets import (
     QComboBox,
     QAbstractItemView,
     QCheckBox,
+    QColorDialog,
+    QDialog,
     QFrame,
     QFormLayout,
     QGridLayout,
@@ -20,6 +24,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMdiArea,
     QPushButton,
+    QSizePolicy,
     QSplitter,
     QDoubleSpinBox,
     QSpinBox,
@@ -40,6 +45,158 @@ class InstrumentTool:
     key: str
     name: str
     description: str
+
+
+class ScopeWindow(QDialog):
+    """Standalone oscilloscope workspace opened from schematic scope probes."""
+
+    def __init__(
+        self,
+        backend: DiscoveryBackendAdapter,
+        parent: QWidget | None = None,
+        title: str = "Oscilloscope",
+    ):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(1080, 760)
+        self.setMinimumSize(900, 560)
+        self.setSizeGripEnabled(False)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        tool = InstrumentTool(
+            "scope_window",
+            "Scope",
+            "Capture and inspect analog waveforms.",
+        )
+        self.panel = ScopePanel(tool, backend)
+
+        layout.addWidget(self.panel, 1)
+
+    def apply_theme(self, theme):
+        if hasattr(self.panel, "apply_theme"):
+            self.panel.apply_theme(theme)
+
+    def closeEvent(self, event):
+        try:
+            self.panel.shutdown()
+        except Exception:
+            pass
+        super().closeEvent(event)
+
+
+class MathExpressionDialog(QDialog):
+    """Small WaveForms-style editor for one custom math channel expression."""
+
+    def __init__(self, parent: QWidget | None = None, expression: str = "pow(C1,3)"):
+        super().__init__(parent)
+        self.setWindowTitle("Custom Math")
+        self.resize(390, 360)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(6)
+
+        title_row = QHBoxLayout()
+        title_row.addWidget(QLabel("Script"))
+        title_row.addWidget(QLabel("Options"))
+        title_row.addStretch(1)
+        layout.addLayout(title_row)
+
+        self.editor = QTextEdit()
+        self.editor.setAcceptRichText(False)
+        self.editor.setPlainText(expression.strip() or "pow(C1,3)")
+        self.editor.setMinimumHeight(74)
+        layout.addWidget(self.editor)
+
+        self.insert_chk = QCheckBox("Insert")
+        self.insert_chk.setChecked(True)
+        layout.addWidget(self.insert_chk)
+
+        keypad = QGridLayout()
+        keypad.setHorizontalSpacing(3)
+        keypad.setVerticalSpacing(3)
+        entries = [
+            ["Time", "+", "pow(,)", "sin()", "abs()", "("],
+            ["Rate", "-", "log(,base)", "cos()", "round()", ")"],
+            ["First", "*", "log10()", "tan()", "floor()", "PI"],
+            ["C1", "%", "log()", "asin()", "ceil()", "E"],
+            ["C2", "abs()", "log2()", "acos()", "trunc()", ""],
+            ["M1", "sqr()", "min(,)", "atan()", "sign()", ""],
+            ["...", "sqrt()", "max(,)", "atan2(,)", "random()", "Clear"],
+        ]
+        for r, row in enumerate(entries):
+            for c, text in enumerate(row):
+                if not text:
+                    continue
+                btn = QPushButton(text)
+                btn.setMinimumHeight(22)
+                btn.clicked.connect(lambda _=False, t=text: self._insert_token(t))
+                keypad.addWidget(btn, r, c)
+        layout.addLayout(keypad)
+
+        self.error = QLabel("")
+        self.error.setWordWrap(True)
+        self.error.setStyleSheet("color: #ff7b7b;")
+        layout.addWidget(self.error)
+
+        units_row = QHBoxLayout()
+        units_row.addWidget(QLabel("Units:"))
+        self.units = QComboBox()
+        self.units.addItems(["V"])
+        units_row.addWidget(self.units, 1)
+        layout.addLayout(units_row)
+
+        actions = QHBoxLayout()
+        self.apply_btn = QPushButton("Apply")
+        self.cancel_btn = QPushButton("Cancel")
+        self.ok_btn = QPushButton("OK")
+        actions.addWidget(self.apply_btn)
+        actions.addStretch(1)
+        actions.addWidget(self.cancel_btn)
+        actions.addWidget(self.ok_btn)
+        layout.addLayout(actions)
+
+        self.apply_btn.clicked.connect(self._validate)
+        self.cancel_btn.clicked.connect(self.reject)
+        self.ok_btn.clicked.connect(self._accept_if_valid)
+
+    def expression(self) -> str:
+        return self.editor.toPlainText().strip()
+
+    def _insert_token(self, token: str):
+        if token == "Clear":
+            self.editor.clear()
+            return
+        insert = {
+            "Time": "Time",
+            "Rate": "Rate",
+            "First": "First",
+            "sqr()": "sqr(",
+            "sqrt()": "sqrt(",
+            "pow(,)": "pow(",
+            "log(,base)": "log(",
+            "min(,)": "min(",
+            "max(,)": "max(",
+            "atan2(,)": "atan2(",
+        }.get(token, token)
+        if insert.endswith("()"):
+            insert = insert[:-1]
+        self.editor.insertPlainText(insert)
+        self.editor.setFocus()
+
+    def _validate(self) -> bool:
+        try:
+            ScopePanel.compile_math_expression(self.expression())
+        except Exception as exc:
+            self.error.setText(str(exc))
+            return False
+        self.error.setText("")
+        return True
+
+    def _accept_if_valid(self):
+        if self._validate():
+            self.accept()
 
 
 class ToolPanel(QWidget):
@@ -135,11 +292,13 @@ class ScopeWaveformWidget(QWidget):
         self._sample_rate_hz = 1e5
         self._time_div_s = 1e-3
         self._trigger_position_fraction = 0.5
+        self._trigger_position_s = 0.0
         self._ch1_vdiv = 0.5
         self._ch2_vdiv = 0.5
         self._ch1_offset_v = 0.0
         self._ch2_offset_v = 0.0
         self._ch2_enabled = False
+        self._math_views: Dict[str, dict] = {}
         self._vertical_divisions = 6  # 3 divisions above and below center
         self._plot_bg = QColor(16, 16, 18)
         self._minor_grid = QColor(56, 56, 62)
@@ -149,6 +308,12 @@ class ScopeWaveformWidget(QWidget):
         self._frame_color = QColor(110, 110, 120)
         self._trace_ch1 = QColor(255, 212, 84)
         self._trace_ch2 = QColor(64, 220, 255)
+        self._trace_math = [
+            QColor(255, 105, 180),
+            QColor(120, 255, 120),
+            QColor(255, 160, 72),
+            QColor(190, 135, 255),
+        ]
         self._empty_text = QColor(150, 150, 158)
         # Keep the plot compact enough so docking/splitting stays flexible.
         self.setMinimumHeight(120)
@@ -163,22 +328,26 @@ class ScopeWaveformWidget(QWidget):
         sample_rate_hz: float,
         time_div_s: float,
         trigger_position_fraction: float,
+        trigger_position_s: float,
         ch1_vdiv: float,
         ch2_vdiv: float,
         ch1_offset_v: float,
         ch2_offset_v: float,
         ch2_enabled: bool,
         autoscale: bool,
+        math_views: Optional[Dict[str, dict]] = None,
     ):
         self._sample_rate_hz = max(1.0, float(sample_rate_hz))
         self._time_div_s = max(1e-6, float(time_div_s))
         self._trigger_position_fraction = max(0.05, min(0.95, float(trigger_position_fraction)))
+        self._trigger_position_s = float(trigger_position_s)
         self._ch1_vdiv = max(1e-3, float(ch1_vdiv))
         self._ch2_vdiv = max(1e-3, float(ch2_vdiv))
         self._ch1_offset_v = float(ch1_offset_v)
         self._ch2_offset_v = float(ch2_offset_v)
         self._ch2_enabled = bool(ch2_enabled)
         self._autoscale = bool(autoscale)
+        self._math_views = dict(math_views or {})
         self.update()
 
     @staticmethod
@@ -219,11 +388,11 @@ class ScopeWaveformWidget(QWidget):
         # Scope traces/grid render faster and cleaner without antialiasing blur.
         p.setRenderHint(QPainter.Antialiasing, False)
 
-        # Keep margins for axis labels.
-        left_pad = 62
-        right_pad = 62
-        top_pad = 12
-        bottom_pad = 26
+        # Keep enough room for full edge tick labels and voltage labels.
+        left_pad = 86
+        right_pad = 86
+        top_pad = 24
+        bottom_pad = 36
         plot = rect.adjusted(left_pad, top_pad, -right_pad, -bottom_pad)
         w = max(1, plot.width())
         h = max(1, plot.height())
@@ -306,22 +475,63 @@ class ScopeWaveformWidget(QWidget):
         _draw_trace(ch1, self._trace_ch1, ch1_vdiv_eff, ch1_off_eff)
         if self._ch2_enabled:
             _draw_trace(ch2, self._trace_ch2, ch2_vdiv_eff, ch2_off_eff)
+        math_keys = [k for k in self._samples.keys() if k.upper().startswith("M")]
+        for idx, key in enumerate(sorted(math_keys)):
+            view = self._math_views.get(key, {})
+            if not view.get("enabled", True):
+                continue
+            color_value = view.get("color")
+            color = QColor(color_value) if color_value is not None else self._trace_math[idx % len(self._trace_math)]
+            if not color.isValid():
+                color = self._trace_math[idx % len(self._trace_math)]
+            samples = self._samples.get(key, [])
+            vdiv = max(1e-3, float(view.get("vdiv", ch1_vdiv_eff)))
+            offset = float(view.get("offset", 0.0))
+            if self._autoscale and samples:
+                offset = sum(samples) / max(1, len(samples))
+                span = max(samples) - min(samples) if len(samples) > 1 else 1.0
+                vdiv = max(1e-3, span / max(2.0, float(vdivs - 2)))
+            _draw_trace(samples, color, vdiv, offset)
 
         # Axis labels and ticks.
         p.setPen(QPen(self._axis_text, 1))
         t_scale, t_unit = self._time_axis_unit(self._time_div_s)
+        label_w = 76
         for i in range(0, 11):
             x = int(plot.left() + i * w / 10)
             rel_div = i - (10.0 * self._trigger_position_fraction)
             t = rel_div * self._time_div_s * t_scale
-            p.drawText(x - 28, plot.bottom() + 16, 56, 14, Qt.AlignHCenter | Qt.AlignVCenter, str(int(round(t))))
+            label_x = max(2, min(rect.right() - label_w - 2, x - label_w // 2))
+            p.drawText(
+                label_x,
+                plot.bottom() + 14,
+                label_w,
+                18,
+                Qt.AlignHCenter | Qt.AlignVCenter,
+                str(int(round(t))),
+            )
         for i in range(0, vdivs + 1):
             y = int(plot.top() + i * h / vdivs)
             v1 = ch1_off_eff + ((vdivs / 2.0) - i) * ch1_vdiv_eff
-            p.drawText(2, y - 8, left_pad - 6, 16, Qt.AlignRight | Qt.AlignVCenter, self._fmt_volts(v1))
+            label_y = max(2, min(rect.bottom() - 18, y - 9))
+            p.drawText(
+                4,
+                label_y,
+                left_pad - 10,
+                18,
+                Qt.AlignRight | Qt.AlignVCenter,
+                self._fmt_volts(v1),
+            )
             if self._ch2_enabled:
                 v2 = ch2_off_eff + ((vdivs / 2.0) - i) * ch2_vdiv_eff
-                p.drawText(plot.right() + 6, y - 8, right_pad - 8, 16, Qt.AlignLeft | Qt.AlignVCenter, self._fmt_volts(v2))
+                p.drawText(
+                    plot.right() + 8,
+                    label_y,
+                    right_pad - 12,
+                    18,
+                    Qt.AlignLeft | Qt.AlignVCenter,
+                    self._fmt_volts(v2),
+                )
 
         # Border
         p.setPen(QPen(self._frame_color, 1))
@@ -329,11 +539,11 @@ class ScopeWaveformWidget(QWidget):
         p.setPen(QPen(self._axis_text, 1))
         p.drawText(
             plot.left(),
-            2,
+            4,
             plot.width(),
-            top_pad - 2,
+            top_pad - 6,
             Qt.AlignHCenter | Qt.AlignBottom,
-            f"Time base: {self._fmt_time(self._time_div_s)}/div  |  Trigger: 0 {t_unit}",
+            f"Time base: {self._fmt_time(self._time_div_s)}/div  |  Position: {self._fmt_time(self._trigger_position_s)}",
         )
 
     def apply_theme(self, theme):
@@ -459,12 +669,14 @@ class WavegenPanel(QWidget):
             sample_rate_hz=10000.0,
             time_div_s=0.0002,
             trigger_position_fraction=0.5,
+            trigger_position_s=0.0,
             ch1_vdiv=0.5,
             ch2_vdiv=0.5,
             ch1_offset_v=0.0,
             ch2_offset_v=0.0,
             ch2_enabled=False,
             autoscale=False,
+            math_views={},
         )
         ch1_body.addLayout(ch1_form, 0)
         ch1_body.addWidget(self.ch1_preview, 1)
@@ -528,12 +740,14 @@ class WavegenPanel(QWidget):
             sample_rate_hz=10000.0,
             time_div_s=0.0002,
             trigger_position_fraction=0.5,
+            trigger_position_s=0.0,
             ch1_vdiv=0.5,
             ch2_vdiv=0.5,
             ch1_offset_v=0.0,
             ch2_offset_v=0.0,
             ch2_enabled=False,
             autoscale=False,
+            math_views={},
         )
         ch2_body.addLayout(ch2_form, 0)
         ch2_body.addWidget(self.ch2_preview, 1)
@@ -910,23 +1124,27 @@ class WavegenPanel(QWidget):
             sample_rate_hz=fs1,
             time_div_s=td1,
             trigger_position_fraction=0.5,
+            trigger_position_s=0.0,
             ch1_vdiv=vdiv1,
             ch2_vdiv=vdiv1,
             ch1_offset_v=o1,
             ch2_offset_v=0.0,
             ch2_enabled=False,
             autoscale=False,
+            math_views={},
         )
         self.ch2_preview.set_view(
             sample_rate_hz=fs2,
             time_div_s=td2,
             trigger_position_fraction=0.5,
+            trigger_position_s=0.0,
             ch1_vdiv=vdiv2,
             ch2_vdiv=vdiv2,
             ch1_offset_v=o2,
             ch2_offset_v=0.0,
             ch2_enabled=False,
             autoscale=False,
+            math_views={},
         )
         self.ch1_preview.set_samples({"ch1": s1, "ch2": []})
         self.ch2_preview.set_samples({"ch1": s2, "ch2": []})
@@ -939,6 +1157,458 @@ class WavegenPanel(QWidget):
             txt = QColor(theme.text)
         self.runtime.setStyleSheet(f"color: rgb({txt.red()}, {txt.green()}, {txt.blue()});")
         self.state_label.setStyleSheet(f"color: rgb({txt.red()}, {txt.green()}, {txt.blue()}); font-weight: 600;")
+
+
+class WavegenChannelPanel(QWidget):
+    """Focused single-channel wave generator opened from one schematic WaveGenerator."""
+
+    def __init__(
+        self,
+        tool: InstrumentTool,
+        backend: DiscoveryBackendAdapter,
+        channel: int = 1,
+        shared_state: Optional[dict] = None,
+    ):
+        super().__init__()
+        self.tool = tool
+        self.backend = backend
+        self.channel = 1 if int(channel) != 2 else 2
+        self._shared_state = shared_state if shared_state is not None else self._default_shared_state()
+        self._running = False
+        self._settings = QSettings("NodeZilla", "NodeZilla")
+        self._profile_key = f"instruments/{tool.key}/w{self.channel}"
+
+        self.setObjectName("WavegenChannelPanel")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(6)
+
+        self.runtime = QLabel()
+        self.state_label = QLabel("Ready")
+        self.state_label.setObjectName("WavegenStateLabel")
+
+        toolbar = QFrame()
+        toolbar.setObjectName("WavegenToolbar")
+        top = QHBoxLayout(toolbar)
+        top.setContentsMargins(6, 4, 6, 4)
+        top.setSpacing(6)
+        self.start_btn = QPushButton("Run")
+        self.start_btn.setObjectName("WavegenRunButton")
+        self.stop_btn = QPushButton("Stop")
+        self.apply_btn = QPushButton("Apply")
+        self.enable = QCheckBox("Enable")
+        self.enable.setChecked(True)
+        top.addWidget(self.start_btn)
+        top.addWidget(self.stop_btn)
+        top.addWidget(self.state_label)
+        top.addStretch(1)
+        top.addWidget(self.enable)
+        top.addWidget(self.apply_btn)
+
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(6)
+
+        self.preview = ScopeWaveformWidget()
+        self.preview.setMinimumHeight(280)
+        self.preview.setMinimumWidth(420)
+        body.addWidget(self.preview, 1)
+
+        side = QFrame()
+        side.setObjectName("WavegenSidePanel")
+        side.setMinimumWidth(230)
+        side.setMaximumWidth(280)
+        form = QFormLayout(side)
+        form.setContentsMargins(10, 8, 10, 10)
+        form.setVerticalSpacing(7)
+
+        self.waveform = QComboBox()
+        self.waveform.addItems(["sine", "square", "triangle", "sawtooth", "dc"])
+        self.freq = QDoubleSpinBox()
+        self.freq.setRange(0.001, 20e6)
+        self.freq.setDecimals(3)
+        self.freq.setSingleStep(100.0)
+        self.freq.setValue(1000.0)
+        self.freq.setSuffix(" Hz")
+        self.period_label = QLabel("1.000 ms")
+        self.amp = QDoubleSpinBox()
+        self.amp.setRange(0.0, 5.0)
+        self.amp.setDecimals(3)
+        self.amp.setSingleStep(0.1)
+        self.amp.setValue(1.0)
+        self.amp.setSuffix(" V")
+        self.offset = QDoubleSpinBox()
+        self.offset.setRange(-5.0, 5.0)
+        self.offset.setDecimals(3)
+        self.offset.setSingleStep(0.05)
+        self.offset.setValue(0.0)
+        self.offset.setSuffix(" V")
+        self.sym = QDoubleSpinBox()
+        self.sym.setRange(0.0, 100.0)
+        self.sym.setValue(50.0)
+        self.sym.setSuffix(" %")
+        self.phase = QDoubleSpinBox()
+        self.phase.setRange(-360.0, 360.0)
+        self.phase.setValue(0.0)
+        self.phase.setSuffix(" deg")
+
+        form.addRow(QLabel(f"Channel {self.channel} (W{self.channel})"))
+        form.addRow("Type", self.waveform)
+        form.addRow("Frequency", self.freq)
+        form.addRow("Period", self.period_label)
+        form.addRow("Amplitude", self.amp)
+        form.addRow("Offset", self.offset)
+        form.addRow("Symmetry", self.sym)
+        form.addRow("Phase", self.phase)
+
+        body.addWidget(side)
+
+        layout.addWidget(toolbar)
+        layout.addWidget(self.runtime)
+        layout.addLayout(body, 1)
+
+        self._reconfig_timer = QTimer(self)
+        self._reconfig_timer.setSingleShot(True)
+        self._reconfig_timer.setInterval(300)
+        self._reconfig_timer.timeout.connect(self._run_live_reconfigure)
+
+        self.start_btn.clicked.connect(self._start_requested)
+        self.stop_btn.clicked.connect(self._stop_requested)
+        self.apply_btn.clicked.connect(self._apply_config)
+        for widget_signal in (
+            self.enable.toggled,
+            self.waveform.currentTextChanged,
+            self.freq.valueChanged,
+            self.amp.valueChanged,
+            self.offset.valueChanged,
+            self.sym.valueChanged,
+            self.phase.valueChanged,
+        ):
+            widget_signal.connect(self._save_profile)
+            widget_signal.connect(self._schedule_live_reconfigure)
+        for widget_signal in (
+            self.waveform.currentTextChanged,
+            self.freq.valueChanged,
+            self.amp.valueChanged,
+            self.offset.valueChanged,
+            self.sym.valueChanged,
+            self.phase.valueChanged,
+        ):
+            widget_signal.connect(self._update_preview)
+        self.freq.valueChanged.connect(self._update_period_label)
+
+        self._load_profile()
+        self._set_running(False)
+        self._update_runtime_line()
+        self._update_period_label()
+        self._update_preview()
+        self.apply_theme(None)
+
+    @staticmethod
+    def _fmt_period(freq_hz: float) -> str:
+        return WavegenPanel._fmt_period(freq_hz)
+
+    def _preview_span_s(self, waveform: str, freq_hz: float) -> float:
+        return WavegenPanel._preview_span_s(self, waveform, freq_hz)
+
+    @staticmethod
+    def _default_channel_state(enabled: bool = False) -> dict:
+        return {
+            "enabled": bool(enabled),
+            "waveform": "sine",
+            "frequency_hz": 1000.0,
+            "amplitude_v": 1.0,
+            "offset_v": 0.0,
+            "symmetry_pct": 50.0,
+            "phase_deg": 0.0,
+        }
+
+    @classmethod
+    def _default_shared_state(cls) -> dict:
+        return {
+            1: cls._default_channel_state(False),
+            2: cls._default_channel_state(False),
+        }
+
+    def _current_channel_state(self) -> dict:
+        return {
+            "enabled": bool(self.enable.isChecked()),
+            "waveform": self.waveform.currentText(),
+            "frequency_hz": float(self.freq.value()),
+            "amplitude_v": float(self.amp.value()),
+            "offset_v": float(self.offset.value()),
+            "symmetry_pct": float(self.sym.value()),
+            "phase_deg": float(self.phase.value()),
+        }
+
+    def _sync_shared_state_from_ui(self):
+        self._shared_state[self.channel] = self._current_channel_state()
+
+    def _params(self) -> dict:
+        self._sync_shared_state_from_ui()
+        params = {}
+        for ch in (1, 2):
+            state = dict(self._default_channel_state(False))
+            state.update(self._shared_state.get(ch, {}))
+            prefix = f"ch{ch}"
+            params[f"{prefix}_enabled"] = bool(state["enabled"])
+            params[f"{prefix}_waveform"] = str(state["waveform"])
+            params[f"{prefix}_frequency_hz"] = float(state["frequency_hz"])
+            params[f"{prefix}_amplitude_v"] = float(state["amplitude_v"])
+            params[f"{prefix}_offset_v"] = float(state["offset_v"])
+            params[f"{prefix}_symmetry_pct"] = float(state["symmetry_pct"])
+            params[f"{prefix}_phase_deg"] = float(state["phase_deg"])
+        return params
+
+    def _apply_config(self, quiet: bool = False):
+        ok, msg = self.backend.configure_wavegen(**self._params())
+        if not ok:
+            self.state_label.setText(str(msg)[:48])
+        elif not quiet:
+            self.state_label.setText("Applied")
+        return ok
+
+    def _start_requested(self):
+        self._update_runtime_line()
+        if not self.enable.isChecked():
+            self.enable.setChecked(True)
+        self._sync_shared_state_from_ui()
+        if not self._apply_config():
+            self._set_running(False)
+            return
+        ok, msg = self.backend.start_tool("wavegen")
+        if ok:
+            self._set_running(True)
+            self.state_label.setText("Running")
+        else:
+            self.state_label.setText(str(msg)[:48])
+
+    def _stop_requested(self):
+        self._reconfig_timer.stop()
+        ok, msg = self._turn_off_current_channel()
+        self._set_running(False)
+        self.state_label.setText("Stopped" if ok else str(msg)[:48])
+        return ok
+
+    def _set_current_channel_enabled(self, enabled: bool):
+        self.enable.blockSignals(True)
+        try:
+            self.enable.setChecked(bool(enabled))
+        finally:
+            self.enable.blockSignals(False)
+        self._sync_shared_state_from_ui()
+
+    def _other_channels_enabled(self) -> bool:
+        for ch in (1, 2):
+            if ch == self.channel:
+                continue
+            state = dict(self._default_channel_state(False))
+            state.update(self._shared_state.get(ch, {}))
+            if bool(state.get("enabled", False)):
+                return True
+        return False
+
+    def _zeroed_current_channel_params(self) -> dict:
+        params = self._params()
+        prefix = f"ch{self.channel}"
+        params[f"{prefix}_enabled"] = True
+        params[f"{prefix}_waveform"] = "dc"
+        params[f"{prefix}_frequency_hz"] = max(0.001, float(params.get(f"{prefix}_frequency_hz", 1000.0)))
+        params[f"{prefix}_amplitude_v"] = 0.0
+        params[f"{prefix}_offset_v"] = 0.0
+        params[f"{prefix}_symmetry_pct"] = 50.0
+        params[f"{prefix}_phase_deg"] = 0.0
+        return params
+
+    def _turn_off_current_channel(self) -> tuple[bool, str]:
+        keep_running = self._other_channels_enabled()
+        self._set_current_channel_enabled(False)
+        params = self._zeroed_current_channel_params()
+        ok, msg = self.backend.configure_wavegen(**params)
+        if ok:
+            ok, msg = self.backend.start_tool("wavegen")
+        if ok and not keep_running:
+            ok, msg = self.backend.stop_tool("wavegen")
+        return ok, msg
+
+    def _schedule_live_reconfigure(self, *_args):
+        if self._running:
+            self._reconfig_timer.start()
+
+    def _run_live_reconfigure(self):
+        if not self._running:
+            return
+        if not self._apply_config(quiet=True):
+            return
+        ok, msg = self.backend.start_tool("wavegen")
+        if not ok:
+            self._set_running(False)
+            self.state_label.setText(str(msg)[:48])
+
+    def _set_running(self, running: bool):
+        self._running = bool(running)
+        self.start_btn.setEnabled(not running)
+        self.stop_btn.setEnabled(running)
+        self.apply_btn.setEnabled(not running)
+
+    def _update_runtime_line(self):
+        dev = self.backend.connected_device()
+        if dev:
+            self.runtime.setText(f"Runtime: {self.backend.backend_name()} | Device: {dev}")
+        else:
+            self.runtime.setText(f"Runtime: {self.backend.backend_name()} | Device: Disconnected")
+
+    def on_connection_changed(self):
+        self._update_runtime_line()
+        if self.backend.connected_device() is None and self._running:
+            self._set_running(False)
+            self.state_label.setText("Disconnected")
+
+    def shutdown(self):
+        try:
+            self._reconfig_timer.stop()
+        except Exception:
+            pass
+        try:
+            self._turn_off_current_channel()
+        except Exception:
+            self._set_current_channel_enabled(False)
+        self._set_running(False)
+        self.state_label.setText("Stopped")
+
+    def _save_profile(self, *_args):
+        self._sync_shared_state_from_ui()
+        base = self._profile_key
+        self._settings.setValue(f"{base}/enable", bool(self.enable.isChecked()))
+        self._settings.setValue(f"{base}/waveform", self.waveform.currentText())
+        self._settings.setValue(f"{base}/freq", float(self.freq.value()))
+        self._settings.setValue(f"{base}/amp", float(self.amp.value()))
+        self._settings.setValue(f"{base}/offset", float(self.offset.value()))
+        self._settings.setValue(f"{base}/sym", float(self.sym.value()))
+        self._settings.setValue(f"{base}/phase", float(self.phase.value()))
+
+    def _load_profile(self):
+        base = self._profile_key
+        wave = str(self._settings.value(f"{base}/waveform", "sine"))
+        state = dict(self._default_channel_state(False))
+        state.update(self._shared_state.get(self.channel, {}))
+        widgets = [self.enable, self.waveform, self.freq, self.amp, self.offset, self.sym, self.phase]
+        blocked = [w.blockSignals(True) for w in widgets]
+        try:
+            self.enable.setChecked(bool(state.get("enabled", False)))
+            if self.waveform.findText(wave) >= 0:
+                self.waveform.setCurrentText(wave)
+            self.freq.setValue(float(self._settings.value(f"{base}/freq", state.get("frequency_hz", 1000.0))))
+            self.amp.setValue(float(self._settings.value(f"{base}/amp", state.get("amplitude_v", 1.0))))
+            self.offset.setValue(float(self._settings.value(f"{base}/offset", state.get("offset_v", 0.0))))
+            self.sym.setValue(float(self._settings.value(f"{base}/sym", state.get("symmetry_pct", 50.0))))
+            self.phase.setValue(float(self._settings.value(f"{base}/phase", state.get("phase_deg", 0.0))))
+        finally:
+            for widget, was_blocked in zip(widgets, blocked):
+                widget.blockSignals(was_blocked)
+        self._sync_shared_state_from_ui()
+
+    def _update_period_label(self):
+        self.period_label.setText(self._fmt_period(float(self.freq.value())))
+
+    def _update_preview(self, *_args):
+        samples = WavegenPanel._make_preview_samples_with_shape(
+            self,
+            self.waveform.currentText(),
+            float(self.freq.value()),
+            float(self.amp.value()),
+            float(self.offset.value()),
+            float(self.sym.value()),
+            float(self.phase.value()),
+            500,
+        )
+        span = WavegenPanel._preview_span_s(self, self.waveform.currentText(), float(self.freq.value()))
+        fs = max(1.0, (max(2, len(samples)) - 1) / span)
+        time_div_s = max(1e-9, span / 10.0)
+        vdiv = max(0.05, abs(float(self.amp.value())) / 2.0)
+        self.preview.set_view(
+            sample_rate_hz=fs,
+            time_div_s=time_div_s,
+            trigger_position_fraction=0.5,
+            trigger_position_s=0.0,
+            ch1_vdiv=vdiv,
+            ch2_vdiv=vdiv,
+            ch1_offset_v=float(self.offset.value()),
+            ch2_offset_v=0.0,
+            ch2_enabled=False,
+            autoscale=False,
+            math_views={},
+        )
+        self.preview.set_samples({"ch1": samples, "ch2": []})
+
+    def apply_theme(self, theme):
+        self.preview.apply_theme(theme)
+        self.setStyleSheet(
+            """
+            QWidget#WavegenChannelPanel {
+                background: #2f2f31;
+                color: #e6e6e6;
+                font-size: 12px;
+            }
+            QFrame#WavegenToolbar,
+            QFrame#WavegenSidePanel {
+                background: #38383a;
+                border: 1px solid #55565a;
+            }
+            QLabel { color: #e1e1e1; }
+            QLabel#WavegenStateLabel {
+                background: #050505;
+                color: #ffffff;
+                border: 2px solid #2b8fef;
+                min-width: 92px;
+                padding: 3px 12px;
+                font-weight: 700;
+            }
+            QPushButton, QComboBox, QSpinBox, QDoubleSpinBox {
+                background: #242426;
+                border: 1px solid #505156;
+                color: #f2f2f2;
+                min-height: 22px;
+                padding: 1px 5px;
+            }
+            QPushButton#WavegenRunButton { color: #78f28b; }
+            QCheckBox { color: #ededed; spacing: 5px; }
+            """
+        )
+
+
+class WavegenWindow(QDialog):
+    """Standalone single-channel wave generator window."""
+
+    def __init__(
+        self,
+        backend: DiscoveryBackendAdapter,
+        channel: int = 1,
+        shared_state: Optional[dict] = None,
+        parent: QWidget | None = None,
+        title: str = "Wave Generator",
+    ):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(760, 520)
+        self.setMinimumSize(640, 420)
+        self.setSizeGripEnabled(False)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        tool = InstrumentTool("wavegen_window", "Wavegen", "Generate analog stimulus signals.")
+        self.panel = WavegenChannelPanel(tool, backend, channel=channel, shared_state=shared_state)
+        layout.addWidget(self.panel, 1)
+
+    def apply_theme(self, theme):
+        if hasattr(self.panel, "apply_theme"):
+            self.panel.apply_theme(theme)
+
+    def closeEvent(self, event):
+        try:
+            self.panel.shutdown()
+        except Exception:
+            pass
+        super().closeEvent(event)
 
 
 class ScopePanel(QWidget):
@@ -962,18 +1632,30 @@ class ScopePanel(QWidget):
         self._display_ch2: List[float] = []
         self._record_ch1: List[float] = []
         self._record_ch2: List[float] = []
+        self._math_channels: List[dict] = []
+        self._last_math_samples: Dict[str, List[float]] = {}
         self._screen_write_idx = 0
         self._settings = QSettings("NodeZilla", "NodeZilla")
         self._profile_key = f"instruments/{tool.key}"
 
+        self.setObjectName("ScopePanel")
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(4)
         self.runtime = QLabel()
-        self.state_label = QLabel("State: Idle")
+        self.state_label = QLabel("Ready")
+        self.state_label.setObjectName("ScopeStateLabel")
 
-        top = QHBoxLayout()
+        toolbar_frame = QFrame()
+        toolbar_frame.setObjectName("ScopeToolbar")
+        top = QHBoxLayout(toolbar_frame)
+        top.setContentsMargins(6, 4, 6, 4)
+        top.setSpacing(6)
         self.start_btn = QPushButton("Run")
+        self.start_btn.setObjectName("ScopeRunButton")
         self.stop_btn = QPushButton("Stop")
         self.single_btn = QPushButton("Single")
+        self.single_btn.setObjectName("ScopeSingleButton")
         self.config_btn = QPushButton("Apply")
         self.buffer_count = QSpinBox()
         self.buffer_count.setRange(1, 64)
@@ -1014,19 +1696,14 @@ class ScopePanel(QWidget):
         self.trigger_level.setSingleStep(0.05)
         self.trigger_level.setValue(0.0)
 
+        top.addWidget(self.single_btn)
         top.addWidget(self.start_btn)
         top.addWidget(self.stop_btn)
-        top.addWidget(self.single_btn)
+        top.addWidget(self.state_label)
         top.addWidget(QLabel("Buffer"))
         top.addWidget(self.buffer_count)
         top.addWidget(QLabel("Mode"))
         top.addWidget(self.update_mode)
-        top.addWidget(QLabel("Update"))
-        top.addWidget(self.update_interval)
-        top.addWidget(QLabel("Fs"))
-        top.addWidget(self.sample_rate)
-        top.addWidget(QLabel("Time"))
-        top.addWidget(self.time_div)
         top.addWidget(QLabel("Trigger"))
         top.addWidget(self.trigger_mode)
         top.addWidget(QLabel("Src"))
@@ -1037,7 +1714,12 @@ class ScopePanel(QWidget):
         top.addWidget(self.config_btn)
         top.addStretch(1)
 
-        meas = QHBoxLayout()
+        meas_frame = QFrame()
+        meas_frame.setObjectName("ScopeMeasureBar")
+        meas = QHBoxLayout(meas_frame)
+        self._measure_layout = meas
+        meas.setContentsMargins(6, 2, 6, 2)
+        meas.setSpacing(10)
         self.m_vpp = QLabel("Vpp: --")
         self.m_vrms = QLabel("Vrms: --")
         self.m_vmean = QLabel("Vmean: --")
@@ -1045,59 +1727,101 @@ class ScopePanel(QWidget):
         self.m2_vrms = QLabel("CH2 Vrms: --")
         self.m_points = QLabel("Samples: 0")
         self.span_label = QLabel("Span: --")
-        for w in (self.runtime, self.state_label, self.span_label, self.m_vpp, self.m_vrms, self.m_vmean, self.m2_vpp, self.m2_vrms, self.m_points):
+        self.ch1_badge = QLabel("C1")
+        self.ch1_badge.setObjectName("ScopeCh1Badge")
+        self.ch2_badge = QLabel("C2")
+        self.ch2_badge.setObjectName("ScopeCh2Badge")
+        for w in (self.runtime, self.span_label, self.ch1_badge, self.ch2_badge, self.m_vpp, self.m_vrms, self.m_vmean, self.m2_vpp, self.m2_vrms, self.m_points):
             meas.addWidget(w)
         meas.addStretch(1)
 
         center = QHBoxLayout()
+        center.setContentsMargins(0, 0, 0, 0)
+        center.setSpacing(6)
         self.wave = ScopeWaveformWidget()
         # Avoid forcing oversized dock widths on small displays.
         self.wave.setMinimumWidth(280)
+        self.wave.setMinimumHeight(360)
         center.addWidget(self.wave, 1)
 
-        side = QVBoxLayout()
+        side_panel = QFrame()
+        side_panel.setObjectName("ScopeSidePanel")
+        side_panel.setMinimumWidth(214)
+        side_panel.setMaximumWidth(260)
+        side = QVBoxLayout(side_panel)
+        side.setContentsMargins(6, 6, 6, 6)
+        side.setSpacing(6)
         time_frame = QFrame()
-        time_frame.setFrameShape(QFrame.StyledPanel)
+        time_frame.setObjectName("ScopeGroup")
         time_form = QFormLayout(time_frame)
+        time_form.setContentsMargins(8, 6, 8, 8)
+        time_form.setVerticalSpacing(5)
         self.time_pos = QDoubleSpinBox()
-        self.time_pos.setRange(5.0, 95.0)
-        self.time_pos.setDecimals(0)
-        self.time_pos.setSingleStep(5.0)
-        self.time_pos.setSuffix(" %")
-        self.time_pos.setValue(50.0)
-        self.time_pos.setToolTip("Horizontal trigger position on screen for repeated mode.")
-        time_form.addRow("Trigger Position", self.time_pos)
-        time_form.addRow("Time Base", QLabel("Use top toolbar"))
-        time_form.addRow("Sample Rate", QLabel("Use top toolbar"))
+        self.time_pos.setRange(-5.0, 5.0)
+        self.time_pos.setDecimals(3)
+        self.time_pos.setSingleStep(0.1)
+        self.time_pos.setSuffix(" ms")
+        self.time_pos.setValue(0.0)
+        self.time_pos.setToolTip("Horizontal trigger offset from the screen center. 0 ms keeps the trigger centered.")
+        time_form.addRow(QLabel("Time"))
+        time_form.addRow("Position", self.time_pos)
+        time_form.addRow("Base", self.time_div)
+        time_form.addRow("Rate", self.sample_rate)
 
         options_frame = QFrame()
-        options_frame.setFrameShape(QFrame.StyledPanel)
+        options_frame.setObjectName("ScopeGroup")
         options_form = QFormLayout(options_frame)
+        options_form.setContentsMargins(8, 6, 8, 8)
+        options_form.setVerticalSpacing(5)
         self.autoscale_chk = QCheckBox("Autoscale")
         self.autoscale_chk.setChecked(False)
         options_form.addRow(self.autoscale_chk)
-        options_form.addRow("Update Mode", QLabel("Use top toolbar"))
-        options_form.addRow("Trigger Src", QLabel("Use top toolbar"))
+        options_form.addRow("Update", self.update_interval)
+
+        add_channel_frame = QFrame()
+        add_channel_frame.setObjectName("ScopeGroup")
+        add_channel_layout = QVBoxLayout(add_channel_frame)
+        add_channel_layout.setContentsMargins(8, 6, 8, 8)
+        self.add_channel_btn = QToolButton()
+        self.add_channel_btn.setText("+ Add Channel")
+        self.add_channel_btn.setPopupMode(QToolButton.InstantPopup)
+        self.add_channel_menu = QMenu(self.add_channel_btn)
+        self.add_math_menu = self.add_channel_menu.addMenu("Math")
+        self.add_math_custom_action = self.add_math_menu.addAction("Custom...")
+        self.add_math_custom_action.triggered.connect(self._add_custom_math_channel)
+        self.add_channel_menu.addSeparator()
+        self.add_channel_menu.addAction("Simple (software)").setEnabled(False)
+        self.add_channel_menu.addAction("Filter (software)").setEnabled(False)
+        self.add_channel_menu.addAction("Reference").setEnabled(False)
+        self.add_channel_btn.setMenu(self.add_channel_menu)
+        add_channel_layout.addWidget(self.add_channel_btn)
 
         self.ch1_frame = QFrame()
-        self.ch1_frame.setFrameShape(QFrame.StyledPanel)
+        self.ch1_frame.setObjectName("ScopeChannelOne")
         ch1_form = QFormLayout(self.ch1_frame)
+        ch1_form.setContentsMargins(8, 6, 8, 8)
+        ch1_form.setVerticalSpacing(5)
         self.ch1_vdiv = QComboBox()
         self.ch1_vdiv.addItems(["50 mV/div", "100 mV/div", "200 mV/div", "500 mV/div", "1 V/div", "2 V/div", "5 V/div"])
         self.ch1_vdiv.setCurrentText("500 mV/div")
+        self.ch1_enable = QCheckBox("Channel 1")
+        self.ch1_enable.setChecked(True)
+        self.ch1_enable.setEnabled(False)
         self.ch1_offset = QDoubleSpinBox()
         self.ch1_offset.setRange(-20.0, 20.0)
         self.ch1_offset.setDecimals(3)
         self.ch1_offset.setSingleStep(0.05)
         self.ch1_offset.setValue(0.0)
-        ch1_form.addRow(QLabel("Channel 1"))
-        ch1_form.addRow("Scale", self.ch1_vdiv)
-        ch1_form.addRow("Offset (V)", self.ch1_offset)
+        ch1_form.addRow(self.ch1_enable)
+        ch1_form.addRow("Offset", self.ch1_offset)
+        ch1_form.addRow("Range", self.ch1_vdiv)
 
         self.ch2_frame = QFrame()
-        self.ch2_frame.setFrameShape(QFrame.StyledPanel)
+        self.ch2_frame.setObjectName("ScopeChannelTwo")
         ch2_form = QFormLayout(self.ch2_frame)
-        self.ch2_enable = QCheckBox("Enable CH2")
+        ch2_form.setContentsMargins(8, 6, 8, 8)
+        ch2_form.setVerticalSpacing(5)
+        self.ch2_enable = QCheckBox("Channel 2")
         self.ch2_enable.setChecked(False)
         self.ch2_vdiv = QComboBox()
         self.ch2_vdiv.addItems(["50 mV/div", "100 mV/div", "200 mV/div", "500 mV/div", "1 V/div", "2 V/div", "5 V/div"])
@@ -1108,18 +1832,25 @@ class ScopePanel(QWidget):
         self.ch2_offset.setSingleStep(0.05)
         self.ch2_offset.setValue(0.0)
         ch2_form.addRow(self.ch2_enable)
-        ch2_form.addRow("Scale", self.ch2_vdiv)
-        ch2_form.addRow("Offset (V)", self.ch2_offset)
+        ch2_form.addRow("Offset", self.ch2_offset)
+        ch2_form.addRow("Range", self.ch2_vdiv)
+
+        self.math_channel_container = QWidget()
+        self.math_channel_layout = QVBoxLayout(self.math_channel_container)
+        self.math_channel_layout.setContentsMargins(0, 0, 0, 0)
+        self.math_channel_layout.setSpacing(6)
 
         side.addWidget(time_frame)
         side.addWidget(options_frame)
+        side.addWidget(add_channel_frame)
         side.addWidget(self.ch1_frame)
         side.addWidget(self.ch2_frame)
+        side.addWidget(self.math_channel_container)
         side.addStretch(1)
-        center.addLayout(side)
+        center.addWidget(side_panel)
 
-        layout.addLayout(top)
-        layout.addLayout(meas)
+        layout.addWidget(toolbar_frame)
+        layout.addWidget(meas_frame)
         layout.addLayout(center, 1)
 
         self.timer = QTimer(self)
@@ -1136,11 +1867,13 @@ class ScopePanel(QWidget):
         self.config_btn.clicked.connect(self._apply_config)
         self.sample_rate.currentTextChanged.connect(self._update_span_label)
         self.time_div.currentTextChanged.connect(self._update_span_label)
+        self.time_div.currentTextChanged.connect(self._update_time_position_range)
         self.autoscale_chk.toggled.connect(self._sync_wave_view)
         self.ch1_vdiv.currentTextChanged.connect(self._sync_wave_view)
         self.ch2_vdiv.currentTextChanged.connect(self._sync_wave_view)
         self.ch1_offset.valueChanged.connect(self._sync_wave_view)
         self.ch2_offset.valueChanged.connect(self._sync_wave_view)
+        self.time_pos.valueChanged.connect(self._on_time_position_changed)
         self.time_div.currentTextChanged.connect(self._sync_wave_view)
         self.sample_rate.currentTextChanged.connect(self._sync_wave_view)
         self.ch2_enable.toggled.connect(self._sync_wave_view)
@@ -1182,7 +1915,79 @@ class ScopePanel(QWidget):
         self._update_runtime_line()
         self._sync_ch2_ui()
         self._sync_wave_view()
+        self._lock_scope_layout()
         self.apply_theme(None)
+
+    def _lock_scope_layout(self):
+        """Keep option changes from changing the top-level window size."""
+        self.state_label.setFixedWidth(128)
+        self.runtime.setMinimumWidth(260)
+        self.runtime.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        for label, width in (
+            (self.span_label, 140),
+            (self.m_vpp, 92),
+            (self.m_vrms, 104),
+            (self.m_vmean, 112),
+            (self.m2_vpp, 116),
+            (self.m2_vrms, 124),
+            (self.m_points, 142),
+        ):
+            label.setMinimumWidth(width)
+            label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+        for button, width in (
+            (self.single_btn, 74),
+            (self.start_btn, 62),
+            (self.stop_btn, 62),
+            (self.config_btn, 66),
+        ):
+            button.setFixedWidth(width)
+        for combo, width in (
+            (self.update_mode, 94),
+            (self.update_interval, 92),
+            (self.sample_rate, 86),
+            (self.time_div, 102),
+            (self.trigger_mode, 78),
+            (self.trigger_source, 68),
+            (self.trigger_edge, 82),
+            (self.ch1_vdiv, 108),
+            (self.ch2_vdiv, 108),
+        ):
+            combo.setMinimumContentsLength(10)
+            combo.setFixedWidth(width)
+        self.buffer_count.setFixedWidth(56)
+        self.trigger_level.setFixedWidth(82)
+        self.time_pos.setFixedWidth(108)
+        self.ch1_offset.setFixedWidth(92)
+        self.ch2_offset.setFixedWidth(92)
+
+    def _style_math_frame(self, frame: QFrame, color: QColor):
+        frame.setStyleSheet(
+            "QFrame#ScopeMathChannel {"
+            "background: #3a3a3c;"
+            "border: 1px solid #5d5e62;"
+            f"border-left: 4px solid rgb({color.red()}, {color.green()}, {color.blue()});"
+            "border-radius: 2px;"
+            "}"
+        )
+
+    def _math_color(self, idx: int) -> QColor:
+        colors = [
+            QColor(255, 105, 180),
+            QColor(120, 255, 120),
+            QColor(255, 160, 72),
+            QColor(190, 135, 255),
+        ]
+        return colors[idx % len(colors)]
+
+    @staticmethod
+    def _math_color_stylesheet(color: QColor) -> str:
+        return (
+            f"background: rgb({color.red()}, {color.green()}, {color.blue()});"
+            "color: #160711; padding: 2px 6px; font-weight: 700;"
+        )
+
+    def _parse_math_range(self, text: str) -> float:
+        return self._parse_vdiv(text)
 
     @staticmethod
     def _parse_time_div(text: str) -> float:
@@ -1242,8 +2047,333 @@ class ScopePanel(QWidget):
         except Exception:
             return 100
 
+    @staticmethod
+    def compile_math_expression(expression: str):
+        expr = str(expression or "").strip()
+        if not expr:
+            raise ValueError("Enter a math expression.")
+        tree = ast.parse(expr, mode="eval")
+        allowed_nodes = (
+            ast.Expression,
+            ast.BinOp,
+            ast.UnaryOp,
+            ast.Call,
+            ast.Name,
+            ast.Load,
+            ast.Constant,
+            ast.Add,
+            ast.Sub,
+            ast.Mult,
+            ast.Div,
+            ast.Mod,
+            ast.Pow,
+            ast.USub,
+            ast.UAdd,
+        )
+        allowed_names = set(ScopePanel._math_env().keys()) | {
+            "C1",
+            "C2",
+            "M1",
+            "M2",
+            "M3",
+            "M4",
+            "Time",
+            "Rate",
+            "First",
+        }
+        for node in ast.walk(tree):
+            if not isinstance(node, allowed_nodes):
+                raise ValueError("Only math expressions and function calls are allowed.")
+            if isinstance(node, ast.Call) and not isinstance(node.func, ast.Name):
+                raise ValueError("Only named math functions are allowed.")
+            if isinstance(node, ast.Name) and node.id not in allowed_names:
+                raise ValueError(f"Unknown name: {node.id}")
+        return compile(tree, "<scope-math>", "eval")
+
+    @staticmethod
+    def _math_env() -> dict:
+        return {
+            "abs": abs,
+            "pow": pow,
+            "round": round,
+            "min": min,
+            "max": max,
+            "sin": math.sin,
+            "cos": math.cos,
+            "tan": math.tan,
+            "asin": math.asin,
+            "acos": math.acos,
+            "atan": math.atan,
+            "atan2": math.atan2,
+            "sqrt": math.sqrt,
+            "sqr": lambda x: x * x,
+            "log": math.log,
+            "log10": math.log10,
+            "log2": math.log2,
+            "floor": math.floor,
+            "ceil": math.ceil,
+            "trunc": math.trunc,
+            "sign": lambda x: -1.0 if x < 0 else (1.0 if x > 0 else 0.0),
+            "random": random.random,
+            "PI": math.pi,
+            "E": math.e,
+        }
+
+    def _add_custom_math_channel(self):
+        default_expr = "pow(C1,3)"
+        dlg = MathExpressionDialog(self, default_expr)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        expr = dlg.expression()
+        try:
+            code = self.compile_math_expression(expr)
+        except Exception as exc:
+            self.state_label.setText(str(exc)[:48])
+            return
+        name = f"M{len(self._math_channels) + 1}"
+        channel = {
+            "name": name,
+            "expr": expr,
+            "code": code,
+            "enabled": True,
+            "offset": 0.0,
+            "vdiv": 1.0,
+            "color": self._math_color(len(self._math_channels)).name(),
+        }
+        self._math_channels.append(channel)
+        self._create_math_channel_controls(channel, len(self._math_channels) - 1)
+        self._set_wave_samples(self._last_samples, self._last_ch2_samples)
+        self._sync_wave_view()
+        self.state_label.setText(f"{name} Added")
+
+    def _create_math_channel_controls(self, channel: dict, idx: int):
+        name = str(channel.get("name", f"M{idx + 1}"))
+        color = QColor(str(channel.get("color", "")))
+        if not color.isValid():
+            color = self._math_color(idx)
+            channel["color"] = color.name()
+
+        badge = QLabel(name)
+        badge.setObjectName("ScopeMathBadge")
+        badge.setStyleSheet(self._math_color_stylesheet(color))
+        channel["badge"] = badge
+        self._measure_layout.insertWidget(4 + idx, badge)
+
+        frame = QFrame()
+        frame.setObjectName("ScopeMathChannel")
+        self._style_math_frame(frame, color)
+        form = QFormLayout(frame)
+        form.setContentsMargins(8, 6, 8, 8)
+        form.setVerticalSpacing(5)
+
+        enable = QCheckBox(name)
+        enable.setChecked(bool(channel.get("enabled", True)))
+        menu_btn = QToolButton()
+        menu_btn.setText("...")
+        menu_btn.setFixedWidth(34)
+        menu_btn.setPopupMode(QToolButton.InstantPopup)
+        menu = QMenu(menu_btn)
+        edit_action = menu.addAction("Edit")
+        color_action = menu.addAction("Color")
+        delete_action = menu.addAction("Delete")
+        menu_btn.setMenu(menu)
+        header_row = QHBoxLayout()
+        header_row.addWidget(enable, 1)
+        header_row.addWidget(menu_btn)
+        expr_label = QLabel(str(channel.get("expr", "")))
+        expr_label.setToolTip(str(channel.get("expr", "")))
+
+        offset = QDoubleSpinBox()
+        offset.setRange(-1000.0, 1000.0)
+        offset.setDecimals(3)
+        offset.setSingleStep(0.05)
+        offset.setValue(float(channel.get("offset", 0.0)))
+        offset.setFixedWidth(92)
+        range_box = QComboBox()
+        range_box.addItems(["50 mV/div", "100 mV/div", "200 mV/div", "500 mV/div", "1 V/div", "2 V/div", "5 V/div"])
+        range_box.setCurrentText("1 V/div")
+        range_box.setFixedWidth(108)
+
+        form.addRow(header_row)
+        form.addRow("Expr", expr_label)
+        form.addRow("Offset", offset)
+        form.addRow("Range", range_box)
+
+        channel.update(
+            {
+                "frame": frame,
+                "enable_widget": enable,
+                "expr_label": expr_label,
+                "menu_button": menu_btn,
+                "offset_widget": offset,
+                "range_widget": range_box,
+            }
+        )
+        self.math_channel_layout.addWidget(frame)
+
+        enable.toggled.connect(lambda checked, ch=channel: self._set_math_channel_enabled(ch, checked))
+        offset.valueChanged.connect(lambda value, ch=channel: self._set_math_channel_offset(ch, value))
+        range_box.currentTextChanged.connect(lambda _text, ch=channel: self._set_math_channel_range(ch))
+        edit_action.triggered.connect(lambda _=False, ch=channel: self._edit_math_channel(ch))
+        color_action.triggered.connect(lambda _=False, ch=channel: self._choose_math_channel_color(ch))
+        delete_action.triggered.connect(lambda _=False, ch=channel: self._delete_math_channel(ch))
+
+    def _set_math_channel_enabled(self, channel: dict, enabled: bool):
+        channel["enabled"] = bool(enabled)
+        badge = channel.get("badge")
+        if badge is not None:
+            badge.setVisible(bool(enabled))
+        self._set_wave_samples(self._last_samples, self._last_ch2_samples)
+        self._sync_wave_view()
+
+    def _set_math_channel_offset(self, channel: dict, value: float):
+        channel["offset"] = float(value)
+        self._sync_wave_view()
+
+    def _set_math_channel_range(self, channel: dict):
+        widget = channel.get("range_widget")
+        if widget is not None:
+            channel["vdiv"] = self._parse_math_range(widget.currentText())
+        self._sync_wave_view()
+
+    def _apply_math_channel_color(self, channel: dict):
+        color = QColor(str(channel.get("color", "")))
+        if not color.isValid():
+            return
+        badge = channel.get("badge")
+        if badge is not None:
+            badge.setStyleSheet(self._math_color_stylesheet(color))
+        frame = channel.get("frame")
+        if frame is not None:
+            self._style_math_frame(frame, color)
+
+    def _choose_math_channel_color(self, channel: dict):
+        current = QColor(str(channel.get("color", "")))
+        if not current.isValid():
+            current = self._math_color(0)
+        color = QColorDialog.getColor(current, self, "Math Channel Color")
+        if not color.isValid():
+            return
+        channel["color"] = color.name()
+        self._apply_math_channel_color(channel)
+        self._sync_wave_view()
+
+    def _delete_math_channel(self, channel: dict):
+        name = str(channel.get("name", "M"))
+        badge = channel.get("badge")
+        if badge is not None:
+            badge.setParent(None)
+            badge.deleteLater()
+        frame = channel.get("frame")
+        if frame is not None:
+            frame.setParent(None)
+            frame.deleteLater()
+        self._math_channels = [ch for ch in self._math_channels if ch is not channel]
+        self._last_math_samples.pop(name, None)
+        self._set_wave_samples(self._last_samples, self._last_ch2_samples)
+        self._sync_wave_view()
+        self.state_label.setText(f"{name} Deleted")
+
+    def _edit_math_channel(self, channel: dict):
+        dlg = MathExpressionDialog(self, str(channel.get("expr", "pow(C1,3)")))
+        if dlg.exec() != QDialog.Accepted:
+            return
+        expr = dlg.expression()
+        try:
+            code = self.compile_math_expression(expr)
+        except Exception as exc:
+            self.state_label.setText(str(exc)[:48])
+            return
+        channel["expr"] = expr
+        channel["code"] = code
+        label = channel.get("expr_label")
+        if label is not None:
+            label.setText(expr)
+            label.setToolTip(expr)
+        self._set_wave_samples(self._last_samples, self._last_ch2_samples)
+
+    def _math_view_config(self) -> Dict[str, dict]:
+        config: Dict[str, dict] = {}
+        for channel in self._math_channels:
+            name = str(channel.get("name", "M"))
+            config[name] = {
+                "enabled": bool(channel.get("enabled", True)),
+                "offset": float(channel.get("offset", 0.0)),
+                "vdiv": float(channel.get("vdiv", 1.0)),
+                "color": str(channel.get("color", "")),
+            }
+        return config
+
+    def _evaluate_math_channels(self, ch1: List[float], ch2: List[float]) -> Dict[str, List[float]]:
+        if not self._math_channels:
+            return {}
+        n = max(len(ch1), len(ch2))
+        if n <= 0:
+            return {}
+        base_env = self._math_env()
+        rate = max(1.0, float(self._scope_params()[0]))
+        out: Dict[str, List[float]] = {}
+        for channel in self._math_channels:
+            if not channel.get("enabled", True):
+                self._last_math_samples.pop(str(channel.get("name", "M")), None)
+                continue
+            name = str(channel.get("name", "M"))
+            code = channel.get("code")
+            values: List[float] = []
+            try:
+                for i in range(n):
+                    env = dict(base_env)
+                    env["C1"] = float(ch1[i]) if i < len(ch1) else 0.0
+                    env["C2"] = float(ch2[i]) if i < len(ch2) else 0.0
+                    env["Time"] = i / rate
+                    env["Rate"] = rate
+                    env["First"] = 1.0 if i == 0 else 0.0
+                    for prev_name, prev_values in out.items():
+                        env[prev_name] = float(prev_values[i]) if i < len(prev_values) else 0.0
+                    value = eval(code, {"__builtins__": {}}, env)
+                    value = float(value)
+                    values.append(value if math.isfinite(value) else 0.0)
+            except Exception as exc:
+                self.state_label.setText(f"{name}: {str(exc)[:40]}")
+                values = [0.0] * n
+            out[name] = values
+        self._last_math_samples = out
+        return out
+
+    def _set_wave_samples(self, ch1: List[float], ch2: List[float]):
+        payload: Dict[str, List[float]] = {"ch1": list(ch1), "ch2": list(ch2)}
+        payload.update(self._evaluate_math_channels(ch1, ch2))
+        self.wave.set_samples(payload)
+
+    def _time_position_ms_range(self) -> tuple[float, float]:
+        # Keep a small margin so the trigger marker remains visible on screen.
+        time_div_s = self._parse_time_div(self.time_div.currentText())
+        half_span_ms = 10.0 * time_div_s * 1e3 * 0.45
+        return -half_span_ms, half_span_ms
+
+    def _update_time_position_range(self, *_args):
+        low, high = self._time_position_ms_range()
+        step = max(0.001, (high - low) / 100.0)
+        value = max(low, min(high, float(self.time_pos.value())))
+        was_blocked = self.time_pos.blockSignals(True)
+        self.time_pos.setRange(low, high)
+        self.time_pos.setSingleStep(step)
+        self.time_pos.setValue(value)
+        self.time_pos.blockSignals(was_blocked)
+
     def _trigger_position_fraction(self) -> float:
-        return max(0.05, min(0.95, float(self.time_pos.value()) / 100.0))
+        time_div_s = self._parse_time_div(self.time_div.currentText())
+        span_ms = max(1e-9, 10.0 * time_div_s * 1e3)
+        position_ms = float(self.time_pos.value())
+        return max(0.05, min(0.95, 0.5 + (position_ms / span_ms)))
+
+    def _time_position_s(self) -> float:
+        return float(self.time_pos.value()) * 1e-3
+
+    def _on_time_position_changed(self, *_args):
+        self._last_trigger_idx = None
+        self._last_trigger_pos = None
+        self._sync_wave_view()
 
     def _apply_config(self, quiet: bool = False):
         fs, disp_buf, cap_buf, ch1_range, ch2_range, ch1_offset, ch2_offset, _ = self._scope_params()
@@ -1263,7 +2393,7 @@ class ScopePanel(QWidget):
             ch2_offset_v=ch2_offset,
         )
         if not quiet and not ok:
-            self.state_label.setText(f"State: {msg}")
+            self.state_label.setText(str(msg)[:48])
         return ok
 
     def _update_poll_interval(self):
@@ -1277,12 +2407,12 @@ class ScopePanel(QWidget):
             return
         ok, msg = self.backend.start_tool("scope")
         if not ok:
-            self.state_label.setText(f"State: {msg}")
+            self.state_label.setText(str(msg)[:48])
             return
         self._poll_scope()
         self.backend.stop_tool("scope")
         self._set_running(False)
-        self.state_label.setText("State: Single capture complete")
+        self.state_label.setText("Single Done")
 
     def _start_requested(self):
         self._update_runtime_line()
@@ -1296,9 +2426,9 @@ class ScopePanel(QWidget):
         if ok:
             self.timer.start()
             self._set_running(True)
-            self.state_label.setText("State: Running")
+            self.state_label.setText("Running")
         else:
-            self.state_label.setText(f"State: {msg}")
+            self.state_label.setText(str(msg)[:48])
 
     def _stop_requested(self):
         self._update_runtime_line()
@@ -1308,7 +2438,7 @@ class ScopePanel(QWidget):
         self._last_trigger_pos = None
         ok, msg = self.backend.stop_tool("scope")
         self._set_running(False)
-        self.state_label.setText("State: Stopped")
+        self.state_label.setText("Stopped")
         return ok
 
     def _poll_scope(self):
@@ -1318,7 +2448,7 @@ class ScopePanel(QWidget):
         if not ok:
             self.timer.stop()
             self._set_running(False)
-            self.state_label.setText(f"State: {msg}")
+            self.state_label.setText(str(msg)[:48])
             return
         ch1 = channels.get("ch1", [])
         ch2 = channels.get("ch2", [])
@@ -1326,7 +2456,7 @@ class ScopePanel(QWidget):
             d1, d2 = self._apply_update_mode(ch1, ch2, int(disp_buf))
             self._last_samples = list(d1)
             self._last_ch2_samples = list(d2)
-            self.wave.set_samples({"ch1": d1, "ch2": d2})
+            self._set_wave_samples(d1, d2)
             self._update_measurements(d1, d2)
             self.m_points.setText(f"Samples: {len(d1)} @ {fs:.0f} Hz")
 
@@ -1351,7 +2481,7 @@ class ScopePanel(QWidget):
         if self.backend.connected_device() is None and self._running:
             self.timer.stop()
             self._set_running(False)
-            self.state_label.setText("State: Disconnected")
+            self.state_label.setText("Disconnected")
 
     def shutdown(self):
         """Stop polling/reconfigure timers and scope acquisition on app shutdown."""
@@ -1381,12 +2511,14 @@ class ScopePanel(QWidget):
             sample_rate_hz=fs,
             time_div_s=time_div_s,
             trigger_position_fraction=self._trigger_position_fraction(),
+            trigger_position_s=self._time_position_s(),
             ch1_vdiv=self._parse_vdiv(self.ch1_vdiv.currentText()),
             ch2_vdiv=self._parse_vdiv(self.ch2_vdiv.currentText()),
             ch1_offset_v=ch1_offset,
             ch2_offset_v=ch2_offset,
             ch2_enabled=bool(self.ch2_enable.isChecked()),
             autoscale=self.autoscale_chk.isChecked(),
+            math_views=self._math_view_config(),
         )
 
     def _sync_ch2_ui(self):
@@ -1398,7 +2530,7 @@ class ScopePanel(QWidget):
         self.m2_vrms.setVisible(enabled)
         if not enabled:
             self._last_ch2_samples = []
-            self.wave.set_samples({"ch1": self._last_samples, "ch2": []})
+            self._set_wave_samples(self._last_samples, [])
             self.m2_vpp.setText("CH2 Vpp: --")
             self.m2_vrms.setText("CH2 Vrms: --")
 
@@ -1691,7 +2823,7 @@ class ScopePanel(QWidget):
         self._settings.setValue(f"{base}/ch2_vdiv", self.ch2_vdiv.currentText())
         self._settings.setValue(f"{base}/ch1_offset_v", float(self.ch1_offset.value()))
         self._settings.setValue(f"{base}/ch2_offset_v", float(self.ch2_offset.value()))
-        self._settings.setValue(f"{base}/trigger_position_pct", float(self.time_pos.value()))
+        self._settings.setValue(f"{base}/trigger_position_ms", float(self.time_pos.value()))
         self._settings.setValue(f"{base}/autoscale", bool(self.autoscale_chk.isChecked()))
         self._settings.setValue(f"{base}/update_mode", self.update_mode.currentText())
         self._settings.setValue(f"{base}/trigger_mode", self.trigger_mode.currentText())
@@ -1710,7 +2842,13 @@ class ScopePanel(QWidget):
         ch2v = str(self._settings.value(f"{base}/ch2_vdiv", "500 mV/div"))
         ch1off = float(self._settings.value(f"{base}/ch1_offset_v", 0.0))
         ch2off = float(self._settings.value(f"{base}/ch2_offset_v", 0.0))
-        trig_pos = float(self._settings.value(f"{base}/trigger_position_pct", 50.0))
+        time_div_s_for_profile = self._parse_time_div(tdiv)
+        saved_pos_ms = self._settings.value(f"{base}/trigger_position_ms", None)
+        if saved_pos_ms is None:
+            old_pct = float(self._settings.value(f"{base}/trigger_position_pct", 50.0))
+            trig_pos_ms = ((max(5.0, min(95.0, old_pct)) / 100.0) - 0.5) * 10.0 * time_div_s_for_profile * 1e3
+        else:
+            trig_pos_ms = float(saved_pos_ms)
         autoscale = str(self._settings.value(f"{base}/autoscale", "false")).lower() in (
             "1",
             "true",
@@ -1732,6 +2870,7 @@ class ScopePanel(QWidget):
         self.buffer_count.setValue(max(1, min(64, bcount)))
         if self.time_div.findText(tdiv) >= 0:
             self.time_div.setCurrentText(tdiv)
+        self._update_time_position_range()
         if self.update_interval.findText(upd) >= 0:
             self.update_interval.setCurrentText(upd)
         if self.ch1_vdiv.findText(ch1v) >= 0:
@@ -1740,7 +2879,8 @@ class ScopePanel(QWidget):
             self.ch2_vdiv.setCurrentText(ch2v)
         self.ch1_offset.setValue(ch1off)
         self.ch2_offset.setValue(ch2off)
-        self.time_pos.setValue(max(5.0, min(95.0, trig_pos)))
+        low, high = self._time_position_ms_range()
+        self.time_pos.setValue(max(low, min(high, trig_pos_ms)))
         self.autoscale_chk.setChecked(autoscale)
         if self.update_mode.findText(upmode) >= 0:
             self.update_mode.setCurrentText(upmode)
@@ -1753,13 +2893,131 @@ class ScopePanel(QWidget):
         self.trigger_level.setValue(tlevel)
         self.ch2_enable.setChecked(ch2)
 
+    def _apply_scope_style(self):
+        self.setStyleSheet(
+            """
+            QWidget#ScopePanel {
+                background: #2f2f31;
+                color: #e6e6e6;
+                font-size: 12px;
+            }
+            QFrame#ScopeToolbar,
+            QFrame#ScopeMeasureBar {
+                background: #38383a;
+                border: 1px solid #55565a;
+            }
+            QFrame#ScopeMeasureBar {
+                border-top: 0;
+            }
+            QFrame#ScopeSidePanel {
+                background: #333335;
+                border-left: 1px solid #5b5c60;
+            }
+            QFrame#ScopeGroup,
+            QFrame#ScopeChannelOne,
+            QFrame#ScopeChannelTwo {
+                background: #3a3a3c;
+                border: 1px solid #5d5e62;
+                border-radius: 2px;
+            }
+            QFrame#ScopeChannelOne {
+                border-left: 4px solid #ffd454;
+            }
+            QFrame#ScopeChannelTwo {
+                border-left: 4px solid #40dcff;
+            }
+            QLabel {
+                color: #e1e1e1;
+            }
+            QLabel#ScopeStateLabel {
+                background: #050505;
+                color: #ffffff;
+                border: 2px solid #d90c2a;
+                min-width: 88px;
+                padding: 3px 12px;
+                font-weight: 700;
+            }
+            QLabel#ScopeCh1Badge {
+                background: #ffd454;
+                color: #171717;
+                padding: 2px 6px;
+                font-weight: 700;
+            }
+            QLabel#ScopeCh2Badge {
+                background: #40dcff;
+                color: #071316;
+                padding: 2px 6px;
+                font-weight: 700;
+            }
+            QLabel#ScopeMathBadge {
+                background: #ff69b4;
+                color: #160711;
+                padding: 2px 6px;
+                font-weight: 700;
+            }
+            QPushButton {
+                background: #46474a;
+                border: 1px solid #686a70;
+                color: #f0f0f0;
+                padding: 3px 10px;
+                min-height: 22px;
+            }
+            QToolButton {
+                background: #46474a;
+                border: 1px solid #686a70;
+                color: #f0f0f0;
+                padding: 3px 10px;
+                min-height: 22px;
+            }
+            QPushButton:hover {
+                background: #515359;
+            }
+            QToolButton:hover {
+                background: #515359;
+            }
+            QPushButton:pressed {
+                background: #2e6f3d;
+            }
+            QPushButton:disabled {
+                color: #868686;
+                background: #393a3c;
+                border-color: #4a4b4e;
+            }
+            QPushButton#ScopeRunButton {
+                color: #78f28b;
+            }
+            QPushButton#ScopeSingleButton {
+                color: #78f28b;
+            }
+            QComboBox,
+            QSpinBox,
+            QDoubleSpinBox {
+                background: #242426;
+                border: 1px solid #505156;
+                color: #f2f2f2;
+                min-height: 22px;
+                padding: 1px 5px;
+            }
+            QComboBox:disabled,
+            QSpinBox:disabled,
+            QDoubleSpinBox:disabled {
+                color: #888;
+                background: #303033;
+            }
+            QCheckBox {
+                color: #ededed;
+                spacing: 5px;
+            }
+            """
+        )
+
     def apply_theme(self, theme):
+        self._apply_scope_style()
         self.wave.apply_theme(theme)
         txt = QColor(200, 200, 208)
         if theme is not None and hasattr(theme, "text"):
             txt = QColor(theme.text)
         self.runtime.setStyleSheet(f"color: rgb({txt.red()}, {txt.green()}, {txt.blue()});")
-        self.state_label.setStyleSheet(f"color: rgb({txt.red()}, {txt.green()}, {txt.blue()}); font-weight: 600;")
 
 
 class SuppliesPanel(QWidget):
