@@ -1,0 +1,225 @@
+{
+  "components": [
+    {
+      "kind": "Ground",
+      "pos": [
+        -1200.0,
+        140.0
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "GND",
+      "value": "GND",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -18.15625,
+          -43.625
+        ],
+        "value_pos": [
+          -49.15904572564614,
+          -1.6322067594433634
+        ],
+        "refdes_manual": false,
+        "value_manual": true
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "Resistor",
+      "pos": [
+        -1200.0,
+        -310.0
+      ],
+      "rotation": 90.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "R1",
+      "value": "1k",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -19.98824242047715,
+          50.86679920477127
+        ],
+        "value_pos": [
+          -0.015019259443363353,
+          50.66003976143156
+        ],
+        "refdes_manual": true,
+        "value_manual": true
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "LEDRED",
+      "pos": [
+        -1200.0,
+        -160.0
+      ],
+      "rotation": 90.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "LED1",
+      "value": "REDLED",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -36.292246520874755,
+          79.96023856858847
+        ],
+        "value_pos": [
+          -14.07554671968191,
+          91.10337972167008
+        ],
+        "refdes_manual": true,
+        "value_manual": true
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "B3F-1000",
+      "pos": [
+        -1200.0,
+        0.0
+      ],
+      "rotation": 90.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "S1",
+      "value": "B3F-1000",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -20.36779324055666,
+          50.71570576540739
+        ],
+        "value_pos": [
+          5.546719681908552,
+          76.65009940357868
+        ],
+        "refdes_manual": true,
+        "value_manual": true
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "5V+",
+      "pos": [
+        -1200.0,
+        -420.0
+      ],
+      "rotation": 270.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "P1",
+      "value": "5V+",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -10.984375,
+          -38.0
+        ],
+        "value_pos": [
+          56.0,
+          -12.0
+        ],
+        "refdes_manual": false,
+        "value_manual": false
+      },
+      "chip": {},
+      "chip_io": {}
+    }
+  ],
+  "texts": [
+    {
+      "text": "This circuit uses a red LED\nto show if a button has been\npressed.\n\nWhen the button is pressed\nthe circuit is completed\nand the LED turns on.\n\nWhen the button is released\nthe circuit is broken and\nthe LED turns off.\n\nThe switch is a manual way\nto turn on and off the LED\nto signal something, it can \nbe replaced with an electronic\nswitch (MOSFET, BJT) to use\na sensing circuit to automatically\nclose and open the switch.",
+      "pos": [
+        -1102.962226640159,
+        -403.69781312127236
+      ],
+      "style": {
+        "family": ".AppleSystemUIFont",
+        "point_size": 23,
+        "bold": false,
+        "italic": false,
+        "color": "#ebebeb",
+        "custom_color": "#ebebeb"
+      }
+    }
+  ],
+  "wires": [
+    {
+      "points": [],
+      "mode": "orth",
+      "a": [
+        3,
+        "P2"
+      ],
+      "b": [
+        0,
+        "A"
+      ]
+    },
+    {
+      "points": [],
+      "mode": "orth",
+      "a": [
+        2,
+        "P2"
+      ],
+      "b": [
+        3,
+        "P1"
+      ]
+    },
+    {
+      "points": [],
+      "mode": "orth",
+      "a": [
+        1,
+        "B"
+      ],
+      "b": [
+        2,
+        "P1"
+      ]
+    },
+    {
+      "points": [],
+      "mode": "orth",
+      "a": [
+        4,
+        "A"
+      ],
+      "b": [
+        1,
+        "A"
+      ]
+    }
+  ],
+  "settings": {
+    "grid_on": true,
+    "grid_size": 20,
+    "grid_style": "dots",
+    "snap_on": true,
+    "wire_junctions": [],
+    "net_names": []
+  },
+  "_format": 2
+}

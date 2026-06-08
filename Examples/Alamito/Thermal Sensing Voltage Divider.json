@@ -1,0 +1,358 @@
+{
+  "components": [
+    {
+      "kind": "Oscilloscope",
+      "pos": [
+        -1154.7169811320755,
+        -181.88679245283018
+      ],
+      "rotation": 90.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "O2",
+      "value": "Oscilloscope",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -12.78125,
+          -64.28301886792453
+        ],
+        "value_pos": [
+          -64.33454474233983,
+          28.020832238398057
+        ],
+        "refdes_manual": false,
+        "value_manual": true
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "Oscilloscope",
+      "pos": [
+        -1154.7169811320755,
+        -341.8867924528302
+      ],
+      "rotation": 90.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "O1",
+      "value": "Oscilloscope",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -11.875,
+          -64.28301886792453
+        ],
+        "value_pos": [
+          -62.705018279944284,
+          30.46512193199125
+        ],
+        "refdes_manual": false,
+        "value_manual": true
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "5V+",
+      "pos": [
+        -1300.0,
+        -460.0
+      ],
+      "rotation": 270.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "P1",
+      "value": "5V+",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -10.984375,
+          -38.0
+        ],
+        "value_pos": [
+          56.0,
+          -12.0
+        ],
+        "refdes_manual": false,
+        "value_manual": false
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "Ground",
+      "pos": [
+        -1300.0,
+        -60.0
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "GND",
+      "value": "GND",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -18.15625,
+          -43.625
+        ],
+        "value_pos": [
+          56.0,
+          -12.0
+        ],
+        "refdes_manual": false,
+        "value_manual": false
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "Resistor",
+      "pos": [
+        -1300.0,
+        -170.0
+      ],
+      "rotation": 270.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "R1",
+      "value": "10k",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          26.359543607714727,
+          -39.03837305659249
+        ],
+        "value_pos": [
+          2.215531405481414,
+          -42.45587562192554
+        ],
+        "refdes_manual": true,
+        "value_manual": true
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "10KThermistor",
+      "pos": [
+        -1300.0,
+        -340.0
+      ],
+      "rotation": 90.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "U1",
+      "value": "Thermistor10K",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -13.115119169777756,
+          96.1396890548142
+        ],
+        "value_pos": [
+          12.90895518710795,
+          134.92298081519743
+        ],
+        "refdes_manual": true,
+        "value_manual": true
+      },
+      "chip": {},
+      "chip_io": {}
+    }
+  ],
+  "texts": [
+    {
+      "text": "This is a Voltage divider\nthe purpose is to divide\nthe total incoming voltage\nusing the two resistors.\n\nThe node in between the\ntwo resistors can be \nconsidered as the output\nvoltage, it is the point\nwhere voltage is divided\n\nHow to verify:\nThe sum of the voltages\naccross U1 plus the voltage\naccross R1 should be close\nto 5V\n\nTrick here instead of using\na fix resistor we are using\na variable resistor that changes\nwith temperature that way we\ncan sense changes in temperature",
+      "pos": [
+        -1050.3891666346406,
+        -446.8102991546614
+      ],
+      "style": {
+        "family": ".AppleSystemUIFont",
+        "point_size": 13,
+        "bold": false,
+        "italic": false,
+        "color": "#ebebeb",
+        "custom_color": ""
+      }
+    }
+  ],
+  "wires": [
+    {
+      "points": [
+        {
+          "x": -1240.0,
+          "y": -160.0
+        },
+        {
+          "x": -1240.0,
+          "y": -100.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        0,
+        "-"
+      ],
+      "b_point": {
+        "x": -1300.0,
+        "y": -100.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1240.0,
+          "y": -200.0
+        },
+        {
+          "x": -1240.0,
+          "y": -240.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        0,
+        "+"
+      ],
+      "b_point": {
+        "x": -1300.0,
+        "y": -240.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1200.0,
+          "y": -260.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        1,
+        "-"
+      ],
+      "b_point": {
+        "x": -1300.0,
+        "y": -260.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1240.0,
+          "y": -360.0
+        },
+        {
+          "x": -1240.0,
+          "y": -440.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        1,
+        "+"
+      ],
+      "b_point": {
+        "x": -1300.0,
+        "y": -440.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1300.0,
+          "y": -440.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        2,
+        "A"
+      ],
+      "b": [
+        5,
+        "P1"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -1300.0,
+          "y": -100.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        4,
+        "A"
+      ],
+      "b": [
+        3,
+        "A"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -1300.0,
+          "y": -260.0
+        },
+        {
+          "x": -1300.0,
+          "y": -240.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        5,
+        "P2"
+      ],
+      "b": [
+        4,
+        "B"
+      ]
+    }
+  ],
+  "settings": {
+    "grid_on": true,
+    "grid_size": 20,
+    "grid_style": "dots",
+    "snap_on": true,
+    "wire_junctions": [
+      {
+        "x": -1300.0,
+        "y": -440.0
+      },
+      {
+        "x": -1300.0,
+        "y": -260.0
+      },
+      {
+        "x": -1300.0,
+        "y": -240.0
+      },
+      {
+        "x": -1300.0,
+        "y": -100.0
+      }
+    ],
+    "net_names": []
+  },
+  "_format": 2
+}

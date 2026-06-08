@@ -144,7 +144,7 @@
         60
       ],
       "value": "",
-      "part": "10KPOT"
+      "part": "POT10K"
     },
     {
       "refdes": "uTHERM1",

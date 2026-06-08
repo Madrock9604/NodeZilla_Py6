@@ -1,0 +1,248 @@
+{
+  "name": "Si Sensores",
+  "description": "Component card made for alamito",
+  "components": [
+    {
+      "refdes": "XO1",
+      "ports": [
+        3,
+        4
+      ],
+      "value": "",
+      "part": "Oscilloscope"
+    },
+    {
+      "refdes": "XO2",
+      "ports": [
+        5,
+        6
+      ],
+      "value": "",
+      "part": "Oscilloscope"
+    },
+    {
+      "refdes": "*T1",
+      "ports": [
+        7
+      ],
+      "value": "",
+      "part": "Trigger"
+    },
+    {
+      "refdes": "*T2",
+      "ports": [
+        8
+      ],
+      "value": "",
+      "part": "Trigger"
+    },
+    {
+      "refdes": "XW1",
+      "ports": [
+        9
+      ],
+      "value": "",
+      "part": "WaveGenerator"
+    },
+    {
+      "refdes": "XW2",
+      "ports": [
+        10
+      ],
+      "value": "",
+      "part": "WaveGenerator"
+    },
+    {
+      "refdes": "uTHERM1",
+      "ports": [
+        11,
+        13
+      ],
+      "value": "",
+      "part": "Thermistor10K"
+    },
+    {
+      "refdes": "cC1",
+      "ports": [
+        14,
+        15
+      ],
+      "value": "100e-9",
+      "part": ""
+    },
+    {
+      "refdes": "cC2",
+      "ports": [
+        16,
+        17
+      ],
+      "value": "1e-6",
+      "part": ""
+    },
+    {
+      "refdes": "cC3",
+      "ports": [
+        18,
+        19
+      ],
+      "value": "1e-6",
+      "part": ""
+    },
+    {
+      "refdes": "rR1",
+      "ports": [
+        20,
+        21
+      ],
+      "value": "10e3",
+      "part": ""
+    },
+    {
+      "refdes": "rR2",
+      "ports": [
+        22,
+        23
+      ],
+      "value": "10e3",
+      "part": ""
+    },
+    {
+      "refdes": "rR3",
+      "ports": [
+        24,
+        25
+      ],
+      "value": "330",
+      "part": ""
+    },
+    {
+      "refdes": "rR4",
+      "ports": [
+        26,
+        27
+      ],
+      "value": "330",
+      "part": ""
+    },
+    {
+      "refdes": "rR5",
+      "ports": [
+        28,
+        29
+      ],
+      "value": "1e3",
+      "part": ""
+    },
+    {
+      "refdes": "rR6",
+      "ports": [
+        30,
+        31
+      ],
+      "value": "1e3",
+      "part": ""
+    },
+    {
+      "refdes": "uPHTR",
+      "ports": [
+        32,
+        33
+      ],
+      "value": "",
+      "part": "Photoresistor10K"
+    },
+    {
+      "refdes": "dD1",
+      "ports": [
+        34,
+        35
+      ],
+      "value": "",
+      "part": "1N4148"
+    },
+    {
+      "refdes": "dD2",
+      "ports": [
+        36,
+        37
+      ],
+      "value": "",
+      "part": "1N4148"
+    },
+    {
+      "refdes": "dD3",
+      "ports": [
+        38,
+        39
+      ],
+      "value": "",
+      "part": "1N4148"
+    },
+    {
+      "refdes": "dD4",
+      "ports": [
+        40,
+        41
+      ],
+      "value": "",
+      "part": "1N4148"
+    },
+    {
+      "refdes": "uPOT1",
+      "ports": [
+        42,
+        45,
+        46
+      ],
+      "value": "",
+      "part": "POT10K"
+    },
+    {
+      "refdes": "uBUZZ1",
+      "ports": [
+        43,
+        47
+      ],
+      "value": "",
+      "part": "PS1240P02BT"
+    },
+    {
+      "refdes": "uSTRAIN",
+      "ports": [
+        51,
+        53,
+        55,
+        57
+      ],
+      "value": "",
+      "part": "SGLC4540"
+    },
+    {
+      "refdes": "sSW1",
+      "ports": [
+        58,
+        62
+      ],
+      "value": "",
+      "part": "B3F-1000"
+    },
+    {
+      "refdes": "sSW2",
+      "ports": [
+        59,
+        63
+      ],
+      "value": "",
+      "part": "B3F-1000"
+    },
+    {
+      "refdes": "dLED1",
+      "ports": [
+        60,
+        61
+      ],
+      "value": "",
+      "part": "REDLED"
+    }
+  ]
+}

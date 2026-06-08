@@ -1,44 +1,38 @@
 {
-  "kind": "POT10K",
-  "display_name": "POT10K",
-  "category": "Passive",
-  "prefix": "POT",
+  "kind": "Photoresistor10K",
+  "display_name": "Photoresistor10K",
+  "category": "Sensors",
+  "prefix": "PHTR",
   "multipart_family": "",
   "unit_name": "",
   "spice_type": "u",
   "value_label": "Part Number",
   "show_value": true,
-  "default_value": "POT10K",
+  "default_value": "Photoresistor10K",
   "type": "component",
   "net_name": "",
-  "symbol": "custom/POT10K.json",
+  "symbol": "custom/Photoresistor10K.json",
   "auto_align_terminals": false,
   "auto_scale_symbol": false,
   "refdes_pos": [
-    -20.0,
-    -80.0
+    -30.0,
+    -70.0
   ],
   "value_pos": [
-    -20.0,
+    -60.0,
     60.0
   ],
   "ports": [
     {
       "name": "P1",
-      "pin_number": 1,
-      "x": -80.0,
+      "pin_number": null,
+      "x": -60.0,
       "y": 0.0
     },
     {
       "name": "P2",
       "pin_number": null,
-      "x": 80.0,
-      "y": 40.0
-    },
-    {
-      "name": "P3",
-      "pin_number": null,
-      "x": 80.0,
+      "x": 60.0,
       "y": 0.0
     }
   ]

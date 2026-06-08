@@ -157,11 +157,25 @@ class SchematicScene(QGraphicsScene):
 
     def drawBackground(self, p: 'QPainter', rect: QRectF):
         if not self.grid_on: return
-        g = self.grid_size
+        base_g = max(1, int(self.grid_size))
+        view_scale = max(
+            1e-6,
+            abs(float(p.worldTransform().m11())),
+            abs(float(p.worldTransform().m22())),
+        )
+        g = base_g
+        # At low zoom, draw a coarser grid so zooming out cannot explode into
+        # hundreds of thousands of dots across the visible scene rect.
+        while g * view_scale < 5.0:
+            g *= 2
+        cols = max(1, int(rect.width() / g) + 2)
+        rows = max(1, int(rect.height() / g) + 2)
+        if cols * rows > 40000:
+            return
         left = int((rect.left()//g)*g); top = int((rect.top()//g)*g)
         p.save()
         # Dotted grid with minor/major emphasis (major every 5 cells)
-        major_step = g * 5
+        major_step = max(base_g * 5, g * 5)
         minor_pen = QPen(self._grid_pen_dots.color(), 1)
         minor_pen.setCosmetic(True)
         minor_pen.setColor(self._grid_pen_dots.color())

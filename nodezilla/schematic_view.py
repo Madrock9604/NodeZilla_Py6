@@ -7,6 +7,9 @@ from PySide6.QtWidgets import QGraphicsView
 
 class SchematicView(QGraphicsView):
     """QGraphicsView with zoom + right-drag panning."""
+    MIN_ZOOM = 0.18
+    MAX_ZOOM = 8.0
+
     def __init__(self, scene):
         super().__init__(scene)
         self.setRenderHint(QPainter.Antialiasing)
@@ -18,6 +21,24 @@ class SchematicView(QGraphicsView):
         self._panning = False
         self._pan_start = QPointF()
         self._pan_drag_mode = QGraphicsView.RubberBandDrag
+
+    def _zoom_level(self) -> float:
+        t = self.transform()
+        sx = abs(float(t.m11()))
+        sy = abs(float(t.m22()))
+        return max(sx, sy, 1e-9)
+
+    def _clamped_zoom_factor(self, factor: float) -> float:
+        current = self._zoom_level()
+        requested = current * float(factor)
+        clamped = max(self.MIN_ZOOM, min(self.MAX_ZOOM, requested))
+        return clamped / current
+
+    def scale(self, sx: float, sy: float):
+        factor = self._clamped_zoom_factor(float(sx))
+        if abs(factor - 1.0) < 1e-6:
+            return
+        super().scale(factor, factor)
 
     def wheelEvent(self, e):
         """Zoom around the mouse cursor."""
