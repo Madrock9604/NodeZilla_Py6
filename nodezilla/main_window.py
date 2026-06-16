@@ -49,6 +49,46 @@ class SchematicTab(QWidget):
         self.setLayout(v)
 
 
+class RuntimeBuildIndicator(QWidget):
+    """Compact status-bar LED for runtime netlist programming state."""
+
+    _COLORS = {
+        "idle": ("#7b7f87", "Build idle"),
+        "running": ("#f2c94c", "Programming"),
+        "ok": ("#32d74b", "Programmed"),
+        "error": ("#ff453a", "Program error"),
+    }
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setObjectName("RuntimeBuildIndicator")
+        self._led = QFrame(self)
+        self._led.setObjectName("RuntimeBuildIndicatorLed")
+        self._led.setFixedSize(11, 11)
+        self._label = QLabel("Build idle", self)
+        self._label.setObjectName("RuntimeBuildIndicatorLabel")
+        self._label.setMinimumWidth(76)
+        self._label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 0, 8, 0)
+        layout.setSpacing(6)
+        layout.addWidget(self._led, 0, Qt.AlignVCenter)
+        layout.addWidget(self._label, 0, Qt.AlignVCenter)
+        self.set_state("idle")
+
+    def set_state(self, state: str):
+        color, text = self._COLORS.get(state, self._COLORS["idle"])
+        self._label.setText(text)
+        self.setToolTip(text)
+        self._led.setStyleSheet(
+            "#RuntimeBuildIndicatorLed {"
+            f"background: {color};"
+            f"border: 1px solid {color};"
+            "border-radius: 5px;"
+            "}"
+        )
+
+
 class FloatingToolIsland(QWidget):
     """Top-docked schematic control island."""
 
@@ -225,6 +265,7 @@ class SchematicPowerOverlay(QWidget):
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self._theme_is_dark = True
         self._managed_by_layout = False
+        self._compact = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -241,6 +282,9 @@ class SchematicPowerOverlay(QWidget):
         self.master.setText("Master")
         self.master.setCheckable(True)
         self.master.setFixedWidth(68)
+
+        self.v_pos_label = QLabel("V+")
+        self.v_neg_label = QLabel("V-")
 
         self.v_pos = QDoubleSpinBox()
         self.v_pos.setRange(0.0, 5.0)
@@ -267,10 +311,10 @@ class SchematicPowerOverlay(QWidget):
         self.v_neg_slider.setFixedWidth(86)
 
         ctrl.addWidget(self.master, 0, 0)
-        ctrl.addWidget(QLabel("V+"), 0, 1)
+        ctrl.addWidget(self.v_pos_label, 0, 1)
         ctrl.addWidget(self.v_pos, 0, 2)
         ctrl.addWidget(self.v_pos_slider, 0, 3)
-        ctrl.addWidget(QLabel("V-"), 0, 4)
+        ctrl.addWidget(self.v_neg_label, 0, 4)
         ctrl.addWidget(self.v_neg, 0, 5)
         ctrl.addWidget(self.v_neg_slider, 0, 6)
         self.controls.setMinimumSize(self.controls.sizeHint())
@@ -282,23 +326,30 @@ class SchematicPowerOverlay(QWidget):
         mon.setContentsMargins(8, 5, 8, 5)
         mon.setHorizontalSpacing(8)
         mon.setVerticalSpacing(3)
+        self.m_vp_name = QLabel("V+")
+        self.m_vn_name = QLabel("V-")
+        self.m_usb_v_name = QLabel("USB V")
+        self.m_usb_i_name = QLabel("USB I")
+        self.m_aux_v_name = QLabel("AUX V")
+        self.m_aux_i_name = QLabel("AUX I")
         self.m_vp = self._metric("--")
         self.m_vn = self._metric("--")
         self.m_usb_v = self._metric("--")
         self.m_usb_i = self._metric("--")
         self.m_aux_v = self._metric("--")
         self.m_aux_i = self._metric("--")
+        self._monitor_items = [
+            (self.m_vp_name, self.m_vp),
+            (self.m_vn_name, self.m_vn),
+            (self.m_usb_v_name, self.m_usb_v),
+            (self.m_usb_i_name, self.m_usb_i),
+            (self.m_aux_v_name, self.m_aux_v),
+            (self.m_aux_i_name, self.m_aux_i),
+        ]
         for col, (name, lbl) in enumerate(
-            (
-                ("V+", self.m_vp),
-                ("V-", self.m_vn),
-                ("USB V", self.m_usb_v),
-                ("USB I", self.m_usb_i),
-                ("AUX V", self.m_aux_v),
-                ("AUX I", self.m_aux_i),
-            )
+            self._monitor_items
         ):
-            mon.addWidget(QLabel(name), 0, col * 2)
+            mon.addWidget(name, 0, col * 2)
             mon.addWidget(lbl, 0, col * 2 + 1)
         self.monitor.setMinimumSize(self.monitor.sizeHint())
         root.addWidget(self.monitor)
@@ -334,6 +385,26 @@ class SchematicPowerOverlay(QWidget):
         lbl.setAlignment(Qt.AlignCenter)
         lbl.setMinimumWidth(58)
         return lbl
+
+    def set_compact(self, compact: bool):
+        compact = bool(compact)
+        if self._compact == compact:
+            return
+        self._compact = compact
+        self.v_pos_slider.setVisible(not compact)
+        self.v_neg_slider.setVisible(not compact)
+        self.v_pos_slider.setFixedWidth(52 if compact else 86)
+        self.v_neg_slider.setFixedWidth(52 if compact else 86)
+        for widget in (self.m_aux_v_name, self.m_aux_v, self.m_aux_i_name, self.m_aux_i):
+            widget.setVisible(not compact)
+        for lbl in (self.m_vp, self.m_vn, self.m_usb_v, self.m_usb_i, self.m_aux_v, self.m_aux_i):
+            lbl.setMinimumWidth(44 if compact else 58)
+        self.controls.setMinimumSize(0, 0)
+        self.monitor.setMinimumSize(0, 0)
+        self.controls.adjustSize()
+        self.monitor.adjustSize()
+        self.controls.setMinimumSize(self.controls.sizeHint())
+        self.monitor.setMinimumSize(self.monitor.sizeHint())
 
     def _sync_slider(self, slider: QSlider, value_v: float):
         value = int(round(float(value_v) * 1000.0))
@@ -565,7 +636,12 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("NodeZilla (Beta) V1.0.4")
-        self.resize(1400, 850)
+        screen = QApplication.primaryScreen()
+        avail = screen.availableGeometry() if screen is not None else None
+        if avail is not None and avail.isValid():
+            self.resize(min(1400, int(avail.width() * 0.94)), min(850, int(avail.height() * 0.90)))
+        else:
+            self.resize(1100, 720)
         self._did_initial_screen_fit = False
         self._screen_fit_hooked = False
         # Runtime netlist outputs for external automation/gizmo flows.
@@ -579,6 +655,7 @@ class MainWindow(QMainWindow):
 
         self.tabs = QTabWidget()
         self.status_label = QLabel("Ready")
+        self.runtime_build_indicator = RuntimeBuildIndicator(self)
         self.undo_stack = QUndoStack(self)
 
         self._watcher = ThemeWatcher(QApplication.instance(), self._apply_theme)
@@ -1294,6 +1371,8 @@ class MainWindow(QMainWindow):
         self.hw_disconnect_btn = QPushButton("Disconnect")
         self.hw_disconnect_btn.setEnabled(False)
         self.hw_backend = QLabel(f"Backend: {self.backend.backend_name()}")
+        self.hw_devices.setMinimumWidth(130)
+        self.hw_devices.setMaximumWidth(270)
 
         tb.addWidget(QLabel("Device"))
         tb.addWidget(self.hw_devices)
@@ -1442,6 +1521,7 @@ class MainWindow(QMainWindow):
         x = min(max(self.x(), avail.left()), max(avail.left(), avail.right() - self.width() + 1))
         y = min(max(self.y(), avail.top()), max(avail.top(), avail.bottom() - self.height() + 1))
         self.move(x, y)
+        self._update_responsive_chrome()
 
     def changeEvent(self, event):
         super().changeEvent(event)
@@ -1450,6 +1530,11 @@ class MainWindow(QMainWindow):
                 self.setMaximumSize(QSize(16777215, 16777215))
             else:
                 QTimer.singleShot(0, self._fit_window_to_screen)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "_schematic_power_overlay"):
+            self._update_responsive_chrome()
 
     def _ensure_screen_fit_hooks(self):
         if self._screen_fit_hooked:
@@ -1680,6 +1765,7 @@ class MainWindow(QMainWindow):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self._hardware_toolbar.addWidget(spacer)
         self._hardware_toolbar.addWidget(self._schematic_power_overlay.controls)
+        self.statusBar().addPermanentWidget(self.runtime_build_indicator)
         self.statusBar().addPermanentWidget(self._schematic_power_overlay.monitor)
         try:
             self._schematic_power_overlay.apply_theme(self._watcher.current_theme())
@@ -1687,6 +1773,30 @@ class MainWindow(QMainWindow):
             pass
         self._schematic_power_overlay.controls.show()
         self._schematic_power_overlay.monitor.show()
+        self._update_responsive_chrome()
+
+    def _set_runtime_build_indicator(self, state: str):
+        indicator = getattr(self, "runtime_build_indicator", None)
+        if indicator is None:
+            return
+        indicator.set_state(state)
+        QApplication.processEvents()
+
+    def _update_responsive_chrome(self):
+        width = max(1, int(self.width()))
+        screen = self.windowHandle().screen() if self.windowHandle() is not None else QApplication.primaryScreen()
+        avail_w = screen.availableGeometry().width() if screen is not None else width
+        compact = width < 1180 or avail_w < 1280
+        if hasattr(self, "_schematic_power_overlay") and self._schematic_power_overlay is not None:
+            self._schematic_power_overlay.set_compact(compact)
+        if hasattr(self, "hw_refresh_btn"):
+            self.hw_refresh_btn.setText("Ref" if compact else "Refresh")
+            self.hw_connect_btn.setText("Conn" if compact else "Connect")
+            self.hw_disconnect_btn.setText("Disc" if compact else "Disconnect")
+            self.hw_backend.setVisible(not compact)
+            self.hw_devices.setMaximumWidth(170 if compact else 270)
+        if hasattr(self, "status_label"):
+            self.status_label.setVisible(not compact)
 
     def _build_menu(self):
         """Create file menu actions (new/open/save/export/custom parts)."""
@@ -2134,7 +2244,9 @@ class MainWindow(QMainWindow):
         """
         backend = self.backend
         sc = self.schematic_tab.scene
+        self._set_runtime_build_indicator("running")
         if backend.connected_device() is None:
+            self._set_runtime_build_indicator("error")
             QMessageBox.warning(self, "Device required", "Connect a device first.")
             return
 
@@ -2183,6 +2295,7 @@ class MainWindow(QMainWindow):
         try:
             netlist_text = sc.export_netlist_text()
         except Exception as e:
+            self._set_runtime_build_indicator("error")
             QMessageBox.critical(self, "Error", f"Failed to build netlist: {e}")
             return
 
@@ -2201,6 +2314,7 @@ class MainWindow(QMainWindow):
             with os.fdopen(fd, "w") as f:
                 f.write(netlist_text)
         except Exception as e:
+            self._set_runtime_build_indicator("error")
             QMessageBox.critical(self, "Error", f"Failed to write runtime netlist: {e}")
             return
 
@@ -2254,6 +2368,7 @@ class MainWindow(QMainWindow):
             )
         except Exception as e:
             extra = f"\n\nDebug log:\n{debug_log_fallback_path}" if runtime_debug_enabled else ""
+            self._set_runtime_build_indicator("error")
             QMessageBox.critical(
                 self,
                 "Runtime script error",
@@ -2316,6 +2431,7 @@ class MainWindow(QMainWindow):
                 f"Runtime build debug log: {debug_log_fallback_path}",
                 8000,
             )
+        self._set_runtime_build_indicator("ok")
         self.statusBar().showMessage(
             f"Runtime SPICE netlist ready: {self.runtime_spice_netlist_path}",
             5000,

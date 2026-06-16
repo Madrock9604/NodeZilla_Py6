@@ -1,6 +1,6 @@
 {
   "kind": "Capacitor",
-  "display_name": "Capacitor",
+  "display_name": "Ceramic_Capacitors",
   "category": "Passive",
   "prefix": "C",
   "spice_type": "C",

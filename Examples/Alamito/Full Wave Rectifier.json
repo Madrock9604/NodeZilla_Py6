@@ -1,0 +1,568 @@
+{
+  "components": [
+    {
+      "kind": "Electrolytic_Capacitors",
+      "pos": [
+        -1390.0,
+        -60.0
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "C1",
+      "value": "1uF",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -11.5078125,
+          -43.0
+        ],
+        "value_pos": [
+          -14.2890625,
+          24.0
+        ],
+        "refdes_manual": false,
+        "value_manual": false
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "Oscilloscope",
+      "pos": [
+        -1398.1132075471698,
+        -265.2830188679245
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": -1.0,
+        "my": 1.0
+      },
+      "refdes": "O1",
+      "value": "Oscilloscope",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -75.27091107373735,
+          -39.81442161139434
+        ],
+        "value_pos": [
+          -46.78477336482365,
+          -19.60998186787195
+        ],
+        "refdes_manual": true,
+        "value_manual": true
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "1N4148",
+      "pos": [
+        -1600.0,
+        -300.0
+      ],
+      "rotation": 270.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "D1",
+      "value": "1N4148",
+      "pl_source_id": 14,
+      "labels": {
+        "refdes_pos": [
+          -10.0,
+          -50.0
+        ],
+        "value_pos": [
+          -36.92249263209064,
+          -82.49050527147324
+        ],
+        "refdes_manual": false,
+        "value_manual": true
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "1N4148",
+      "pos": [
+        -1160.0,
+        -300.0
+      ],
+      "rotation": 90.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "D2",
+      "value": "1N4148",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -10.0,
+          -50.0
+        ],
+        "value_pos": [
+          20.188071582657244,
+          -33.167745267827286
+        ],
+        "refdes_manual": false,
+        "value_manual": true
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "1N4148",
+      "pos": [
+        -1600.0,
+        -60.0
+      ],
+      "rotation": 90.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "D3",
+      "value": "1N4148",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          9.036854738249303,
+          69.41299790356379
+        ],
+        "value_pos": [
+          40.95554947892924,
+          81.91869474067994
+        ],
+        "refdes_manual": true,
+        "value_manual": true
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "1N4148",
+      "pos": [
+        -1160.0,
+        -60.0
+      ],
+      "rotation": 270.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "D4",
+      "value": "1N4148",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -6.538753683954674,
+          46.049585270257694
+        ],
+        "value_pos": [
+          -30.0,
+          30.0
+        ],
+        "refdes_manual": true,
+        "value_manual": false
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "WaveGenerator",
+      "pos": [
+        -1398.1132075471698,
+        -485.2830188679245
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "W1",
+      "value": "WaveGenerator",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -13.1484375,
+          -64.28301886792453
+        ],
+        "value_pos": [
+          -50.1640625,
+          54.908018867924525
+        ],
+        "refdes_manual": false,
+        "value_manual": false
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "Ground",
+      "pos": [
+        -1380.0,
+        120.0
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "GND",
+      "value": "GND",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -18.15625,
+          -43.625
+        ],
+        "value_pos": [
+          56.0,
+          -12.0
+        ],
+        "refdes_manual": false,
+        "value_manual": false
+      },
+      "chip": {},
+      "chip_io": {}
+    },
+    {
+      "kind": "Resistor",
+      "pos": [
+        -1390.0,
+        -140.0
+      ],
+      "rotation": 0.0,
+      "mirror": {
+        "mx": 1.0,
+        "my": 1.0
+      },
+      "refdes": "R1",
+      "value": "1k",
+      "pl_source_id": -1,
+      "labels": {
+        "refdes_pos": [
+          -37.265407041202934,
+          24.565715207224656
+        ],
+        "value_pos": [
+          -10.3828125,
+          24.0
+        ],
+        "refdes_manual": true,
+        "value_manual": false
+      },
+      "chip": {},
+      "chip_io": {}
+    }
+  ],
+  "texts": [],
+  "wires": [
+    {
+      "points": [
+        {
+          "x": -1260.0,
+          "y": -60.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        0,
+        "+"
+      ],
+      "b_point": {
+        "x": -1260.0,
+        "y": -140.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1520.0,
+          "y": -60.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        0,
+        "-"
+      ],
+      "b_point": {
+        "x": -1520.0,
+        "y": -140.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1380.0,
+          "y": -200.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        1,
+        "+"
+      ],
+      "b_point": {
+        "x": -1160.0,
+        "y": -200.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1420.0,
+          "y": -200.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        1,
+        "-"
+      ],
+      "b_point": {
+        "x": -1600.0,
+        "y": -200.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1600.0,
+          "y": -220.0
+        },
+        {
+          "x": -1600.0,
+          "y": -200.0
+        },
+        {
+          "x": -1600.0,
+          "y": -140.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        2,
+        "P1"
+      ],
+      "b": [
+        4,
+        "P1"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -1160.0,
+          "y": -140.0
+        },
+        {
+          "x": -1160.0,
+          "y": -200.0
+        },
+        {
+          "x": -1160.0,
+          "y": -220.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        5,
+        "P2"
+      ],
+      "b": [
+        3,
+        "P2"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -1600.0,
+          "y": 60.0
+        },
+        {
+          "x": -1380.0,
+          "y": 60.0
+        },
+        {
+          "x": -1160.0,
+          "y": 60.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        4,
+        "P2"
+      ],
+      "b": [
+        5,
+        "P1"
+      ]
+    },
+    {
+      "points": [
+        {
+          "x": -1600.0,
+          "y": -400.0
+        },
+        {
+          "x": -1380.0,
+          "y": -400.0
+        },
+        {
+          "x": -1160.0,
+          "y": -400.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        2,
+        "P2"
+      ],
+      "b": [
+        3,
+        "P1"
+      ]
+    },
+    {
+      "points": [],
+      "mode": "orth",
+      "a": [
+        6,
+        "+"
+      ],
+      "b_point": {
+        "x": -1380.0,
+        "y": -400.0
+      }
+    },
+    {
+      "points": [],
+      "mode": "orth",
+      "a": [
+        7,
+        "A"
+      ],
+      "b_point": {
+        "x": -1380.0,
+        "y": 60.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1260.0,
+          "y": -140.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        8,
+        "B"
+      ],
+      "b_point": {
+        "x": -1160.0,
+        "y": -140.0
+      }
+    },
+    {
+      "points": [
+        {
+          "x": -1520.0,
+          "y": -140.0
+        }
+      ],
+      "mode": "orth",
+      "a": [
+        8,
+        "A"
+      ],
+      "b_point": {
+        "x": -1600.0,
+        "y": -140.0
+      }
+    }
+  ],
+  "settings": {
+    "grid_on": true,
+    "grid_size": 20,
+    "grid_style": "dots",
+    "snap_on": true,
+    "wire_junctions": [
+      {
+        "x": -1600.0,
+        "y": -220.0
+      },
+      {
+        "x": -1600.0,
+        "y": -200.0
+      },
+      {
+        "x": -1600.0,
+        "y": -140.0
+      },
+      {
+        "x": -1520.0,
+        "y": -220.0
+      },
+      {
+        "x": -1520.0,
+        "y": -140.0
+      },
+      {
+        "x": -1440.0,
+        "y": -140.0
+      },
+      {
+        "x": -1380.0,
+        "y": -400.0
+      },
+      {
+        "x": -1380.0,
+        "y": 60.0
+      },
+      {
+        "x": -1340.0,
+        "y": -140.0
+      },
+      {
+        "x": -1260.0,
+        "y": -140.0
+      },
+      {
+        "x": -1240.0,
+        "y": -220.0
+      },
+      {
+        "x": -1160.0,
+        "y": -400.0
+      },
+      {
+        "x": -1160.0,
+        "y": -220.0
+      },
+      {
+        "x": -1160.0,
+        "y": -200.0
+      },
+      {
+        "x": -1160.0,
+        "y": -140.0
+      },
+      {
+        "x": -1160.0,
+        "y": 60.0
+      }
+    ],
+    "net_names": []
+  },
+  "_format": 2
+}

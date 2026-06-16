@@ -1,0 +1,15 @@
+{
+  "kind": "Electrolytic_Capacitors",
+  "display_name": "Electrolytic_Capacitors",
+  "category": "Passive",
+  "prefix": "C",
+  "spice_type": "C",
+  "default_value": "10uF",
+  "symbol": "defaults/electrolytic_capacitor.json",
+  "auto_align_terminals": true,
+  "auto_scale_symbol": true,
+  "ports": [
+    {"name": "-", "x": -50, "y": 0, "pin_number": 1},
+    {"name": "+", "x": 50, "y": 0, "pin_number": 2}
+  ]
+}

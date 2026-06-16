@@ -9,6 +9,7 @@ from typing import Callable, Dict, List, Optional
 from PySide6.QtCore import QPointF, QSettings, QTimer, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QAbstractItemView,
     QCheckBox,
@@ -47,6 +48,18 @@ class InstrumentTool:
     description: str
 
 
+def _screen_fit_size(parent: QWidget | None, preferred_w: int, preferred_h: int, min_w: int, min_h: int) -> tuple[int, int, int, int]:
+    screen = parent.windowHandle().screen() if parent is not None and parent.windowHandle() is not None else QApplication.primaryScreen()
+    avail = screen.availableGeometry() if screen is not None else None
+    if avail is None or not avail.isValid():
+        return preferred_w, preferred_h, min_w, min_h
+    max_w = max(420, int(avail.width() * 0.94))
+    max_h = max(320, int(avail.height() * 0.88))
+    actual_min_w = min(min_w, max_w)
+    actual_min_h = min(min_h, max_h)
+    return max(actual_min_w, min(preferred_w, max_w)), max(actual_min_h, min(preferred_h, max_h)), actual_min_w, actual_min_h
+
+
 class ScopeWindow(QDialog):
     """Standalone oscilloscope workspace opened from schematic scope probes."""
 
@@ -58,8 +71,9 @@ class ScopeWindow(QDialog):
     ):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.resize(1080, 760)
-        self.setMinimumSize(900, 560)
+        w, h, min_w, min_h = _screen_fit_size(parent, 1080, 760, 760, 480)
+        self.resize(w, h)
+        self.setMinimumSize(min_w, min_h)
         self.setSizeGripEnabled(False)
 
         layout = QVBoxLayout(self)
@@ -341,8 +355,8 @@ class ScopeWaveformWidget(QWidget):
         self._time_div_s = max(1e-6, float(time_div_s))
         self._trigger_position_fraction = max(0.05, min(0.95, float(trigger_position_fraction)))
         self._trigger_position_s = float(trigger_position_s)
-        self._ch1_vdiv = max(1e-3, float(ch1_vdiv))
-        self._ch2_vdiv = max(1e-3, float(ch2_vdiv))
+        self._ch1_vdiv = max(1e-9, float(ch1_vdiv))
+        self._ch2_vdiv = max(1e-9, float(ch2_vdiv))
         self._ch1_offset_v = float(ch1_offset_v)
         self._ch2_offset_v = float(ch2_offset_v)
         self._ch2_enabled = bool(ch2_enabled)
@@ -379,7 +393,9 @@ class ScopeWaveformWidget(QWidget):
             return f"{volts:.2f} V"
         if av >= 1e-3:
             return f"{volts * 1e3:.1f} mV"
-        return f"{volts:.4f} V"
+        if av >= 1e-6:
+            return f"{volts * 1e6:.1f} uV"
+        return f"{volts * 1e9:.1f} nV"
 
     def paintEvent(self, _event):
         p = QPainter(self)
@@ -433,18 +449,18 @@ class ScopeWaveformWidget(QWidget):
             if ch1:
                 ch1_off_eff = sum(ch1) / max(1, len(ch1))
                 span = max(ch1) - min(ch1) if len(ch1) > 1 else 1.0
-                ch1_vdiv_eff = max(1e-3, span / max(2.0, float(vdivs - 2)))
+                ch1_vdiv_eff = max(1e-9, span / max(2.0, float(vdivs - 2)))
             if ch2:
                 ch2_off_eff = sum(ch2) / max(1, len(ch2))
                 span = max(ch2) - min(ch2) if len(ch2) > 1 else 1.0
-                ch2_vdiv_eff = max(1e-3, span / max(2.0, float(vdivs - 2)))
+                ch2_vdiv_eff = max(1e-9, span / max(2.0, float(vdivs - 2)))
 
         def _draw_trace(samples: List[float], color: QColor, vdiv: float, offset_v: float):
             if not samples:
                 return
             poly = QPolygonF()
             n = len(samples)
-            px_per_v = (h / float(vdivs)) / max(1e-6, vdiv)
+            px_per_v = (h / float(vdivs)) / max(1e-12, vdiv)
             # Decimate to at most ~1 sample per horizontal pixel for smoother UI.
             target_pts = max(2, w)
             if n > target_pts:
@@ -485,12 +501,12 @@ class ScopeWaveformWidget(QWidget):
             if not color.isValid():
                 color = self._trace_math[idx % len(self._trace_math)]
             samples = self._samples.get(key, [])
-            vdiv = max(1e-3, float(view.get("vdiv", ch1_vdiv_eff)))
+            vdiv = max(1e-9, float(view.get("vdiv", ch1_vdiv_eff)))
             offset = float(view.get("offset", 0.0))
             if self._autoscale and samples:
                 offset = sum(samples) / max(1, len(samples))
                 span = max(samples) - min(samples) if len(samples) > 1 else 1.0
-                vdiv = max(1e-3, span / max(2.0, float(vdivs - 2)))
+                vdiv = max(1e-9, span / max(2.0, float(vdivs - 2)))
             _draw_trace(samples, color, vdiv, offset)
 
         # Axis labels and ticks.
@@ -1590,8 +1606,9 @@ class WavegenWindow(QDialog):
     ):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.resize(760, 520)
-        self.setMinimumSize(640, 420)
+        w, h, min_w, min_h = _screen_fit_size(parent, 760, 520, 540, 360)
+        self.resize(w, h)
+        self.setMinimumSize(min_w, min_h)
         self.setSizeGripEnabled(False)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -1613,6 +1630,30 @@ class WavegenWindow(QDialog):
 
 class ScopePanel(QWidget):
     """Scope-specific panel with real backend config, polling, and measurements."""
+
+    VOLT_DIV_OPTIONS = [
+        "1 uV/div",
+        "2 uV/div",
+        "5 uV/div",
+        "10 uV/div",
+        "20 uV/div",
+        "50 uV/div",
+        "100 uV/div",
+        "200 uV/div",
+        "500 uV/div",
+        "1 mV/div",
+        "2 mV/div",
+        "5 mV/div",
+        "10 mV/div",
+        "20 mV/div",
+        "50 mV/div",
+        "100 mV/div",
+        "200 mV/div",
+        "500 mV/div",
+        "1 V/div",
+        "2 V/div",
+        "5 V/div",
+    ]
 
     def __init__(
         self,
@@ -1802,7 +1843,7 @@ class ScopePanel(QWidget):
         ch1_form.setContentsMargins(8, 6, 8, 8)
         ch1_form.setVerticalSpacing(5)
         self.ch1_vdiv = QComboBox()
-        self.ch1_vdiv.addItems(["50 mV/div", "100 mV/div", "200 mV/div", "500 mV/div", "1 V/div", "2 V/div", "5 V/div"])
+        self.ch1_vdiv.addItems(self.VOLT_DIV_OPTIONS)
         self.ch1_vdiv.setCurrentText("500 mV/div")
         self.ch1_enable = QCheckBox("Channel 1")
         self.ch1_enable.setChecked(True)
@@ -1824,7 +1865,7 @@ class ScopePanel(QWidget):
         self.ch2_enable = QCheckBox("Channel 2")
         self.ch2_enable.setChecked(False)
         self.ch2_vdiv = QComboBox()
-        self.ch2_vdiv.addItems(["50 mV/div", "100 mV/div", "200 mV/div", "500 mV/div", "1 V/div", "2 V/div", "5 V/div"])
+        self.ch2_vdiv.addItems(self.VOLT_DIV_OPTIONS)
         self.ch2_vdiv.setCurrentText("500 mV/div")
         self.ch2_offset = QDoubleSpinBox()
         self.ch2_offset.setRange(-20.0, 20.0)
@@ -2003,6 +2044,10 @@ class ScopePanel(QWidget):
     @staticmethod
     def _parse_vdiv(text: str) -> float:
         val = text.strip().lower()
+        if "uv/div" in val:
+            return float(val.split("uv/div")[0].strip()) * 1e-6
+        if "µv/div" in val:
+            return float(val.split("µv/div")[0].strip()) * 1e-6
         if "mv/div" in val:
             return float(val.split("mv/div")[0].strip()) * 1e-3
         if "v/div" in val:
@@ -2190,7 +2235,7 @@ class ScopePanel(QWidget):
         offset.setValue(float(channel.get("offset", 0.0)))
         offset.setFixedWidth(92)
         range_box = QComboBox()
-        range_box.addItems(["50 mV/div", "100 mV/div", "200 mV/div", "500 mV/div", "1 V/div", "2 V/div", "5 V/div"])
+        range_box.addItems(self.VOLT_DIV_OPTIONS)
         range_box.setCurrentText("1 V/div")
         range_box.setFixedWidth(108)
 

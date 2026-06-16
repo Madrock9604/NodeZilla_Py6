@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import os
 import shutil
 import sys
@@ -79,6 +80,23 @@ def _copy_missing_tree(src: Path, dst: Path):
             shutil.copy2(p, t)
 
 
+def _apply_builtin_asset_migrations():
+    cap_path = user_library_root() / "Passive" / "Capacitor.json"
+    try:
+        data = json.loads(cap_path.read_text())
+    except Exception:
+        return
+    if not isinstance(data, dict) or str(data.get("kind", "")).strip() != "Capacitor":
+        return
+    if str(data.get("display_name", "")).strip() not in {"", "Capacitor"}:
+        return
+    data["display_name"] = "Ceramic_Capacitors"
+    try:
+        cap_path.write_text(json.dumps(data, indent=2) + "\n")
+    except Exception:
+        pass
+
+
 def ensure_user_workspace():
     root = user_root()
     root.mkdir(parents=True, exist_ok=True)
@@ -96,6 +114,7 @@ def ensure_user_workspace():
     _copy_missing_tree(b / "assets" / "components" / "library", user_library_root())
     _copy_missing_tree(b / "assets" / "symbols", user_symbols_root())
     _copy_missing_tree(b / "assets" / "chips", user_chips_root())
+    _apply_builtin_asset_migrations()
     # Support both the newer bundled assets location and the legacy repo
     # Hardware/Cards layout so packaged builds and source runs can ship the
     # same starter card templates.
