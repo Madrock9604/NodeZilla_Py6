@@ -64,32 +64,50 @@
     {
       "refdes": "cC1",
       "ports": [
-        14,
-        15
+        34,
+        36
       ],
-      "value": "100e-9",
+      "value": "100e-6",
       "part": ""
     },
     {
       "refdes": "cC2",
       "ports": [
-        16,
-        17
-      ],
-      "value": "1e-6",
-      "part": ""
-    },
-    {
-      "refdes": "cC3",
-      "ports": [
-        18,
-        19
+        38,
+        40
       ],
       "value": "1e-6",
       "part": ""
     },
     {
       "refdes": "rR1",
+      "ports": [
+        14,
+        15
+      ],
+      "value": "1e3",
+      "part": ""
+    },
+    {
+      "refdes": "rR2",
+      "ports": [
+        16,
+        17
+      ],
+      "value": "1e3",
+      "part": ""
+    },
+    {
+      "refdes": "rR3",
+      "ports": [
+        18,
+        19
+      ],
+      "value": "10e3",
+      "part": ""
+    },
+    {
+      "refdes": "rR4",
       "ports": [
         20,
         21
@@ -98,16 +116,16 @@
       "part": ""
     },
     {
-      "refdes": "rR2",
+      "refdes": "rR5",
       "ports": [
         22,
         23
       ],
-      "value": "10e3",
+      "value": "330",
       "part": ""
     },
     {
-      "refdes": "rR3",
+      "refdes": "rR6",
       "ports": [
         24,
         25
@@ -116,37 +134,10 @@
       "part": ""
     },
     {
-      "refdes": "rR4",
+      "refdes": "uPHTR1",
       "ports": [
-        26,
-        27
-      ],
-      "value": "330",
-      "part": ""
-    },
-    {
-      "refdes": "rR5",
-      "ports": [
-        28,
-        29
-      ],
-      "value": "1e3",
-      "part": ""
-    },
-    {
-      "refdes": "rR6",
-      "ports": [
-        30,
-        31
-      ],
-      "value": "1e3",
-      "part": ""
-    },
-    {
-      "refdes": "uPHTR",
-      "ports": [
-        32,
-        33
+        42,
+        44
       ],
       "value": "",
       "part": "Photoresistor10K"
@@ -154,8 +145,8 @@
     {
       "refdes": "dD1",
       "ports": [
-        34,
-        35
+        26,
+        27
       ],
       "value": "",
       "part": "1N4148"
@@ -163,8 +154,8 @@
     {
       "refdes": "dD2",
       "ports": [
-        36,
-        37
+        28,
+        29
       ],
       "value": "",
       "part": "1N4148"
@@ -172,8 +163,8 @@
     {
       "refdes": "dD3",
       "ports": [
-        38,
-        39
+        30,
+        31
       ],
       "value": "",
       "part": "1N4148"
@@ -181,8 +172,8 @@
     {
       "refdes": "dD4",
       "ports": [
-        40,
-        41
+        32,
+        33
       ],
       "value": "",
       "part": "1N4148"
@@ -190,9 +181,9 @@
     {
       "refdes": "uPOT1",
       "ports": [
-        42,
-        45,
-        46
+        47,
+        49,
+        51
       ],
       "value": "",
       "part": "POT10K"
@@ -200,8 +191,8 @@
     {
       "refdes": "uBUZZ1",
       "ports": [
-        43,
-        47
+        12,
+        45
       ],
       "value": "",
       "part": "PS1240P02BT"
@@ -209,16 +200,25 @@
     {
       "refdes": "uSTRAIN",
       "ports": [
-        51,
-        53,
-        55,
-        57
+        57,
+        59,
+        61,
+        63
       ],
       "value": "",
       "part": "SGLC4540"
     },
     {
       "refdes": "sSW1",
+      "ports": [
+        52,
+        56
+      ],
+      "value": "",
+      "part": "B3F-1000"
+    },
+    {
+      "refdes": "sSW2",
       "ports": [
         58,
         62
@@ -227,22 +227,23 @@
       "part": "B3F-1000"
     },
     {
-      "refdes": "sSW2",
-      "ports": [
-        59,
-        63
-      ],
-      "value": "",
-      "part": "B3F-1000"
-    },
-    {
       "refdes": "dLED1",
       "ports": [
-        60,
-        61
+        41,
+        43
       ],
       "value": "",
       "part": "REDLED"
+    },
+    {
+      "refdes": "uBJT",
+      "ports": [
+        51,
+        53,
+        55
+      ],
+      "value": "",
+      "part": "2N2222"
     }
   ]
 }
